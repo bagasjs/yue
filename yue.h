@@ -23,12 +23,23 @@ typedef enum {
     YUE_OBJECT_CFUNC,
 } yue_ObjectType;
 
+typedef struct yue_File {
+    // pointer to the first character in the string
+    const char *ptr;
+    // .ptr + length of file
+    const char *eof;
+} yue_File;
+
 // recommended bufsz is 64KB
 yue_Context *yue_open(void *buf, size_t bufsz);
-yue_Object *yue_read(yue_Context *ctx, const char *source, size_t len);
 yue_Object *yue_eval(yue_Context *ctx, yue_Object *obj);
 yue_Object *yue_get(yue_Context *ctx, yue_Object *sym);
 void yue_set(yue_Context *ctx, yue_Object *sym, yue_Object *value);
+
+// Executing file
+
+// This will read a single top object and modify the file
+yue_Object *yue_read(yue_Context *ctx, yue_File *file);
 
 // Object constructor
 yue_Object *yue_nil(yue_Context *ctx);
@@ -509,83 +520,57 @@ yue_Object *yue_builtin_assign(yue_Context *ctx, yue_Object *arg)
 static inline bool _isdigit(int c) { return '0' <= c && c <= '9'; }
 static inline bool _isspace(int c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
 
-typedef struct Source {
-    const char *data;
-    const char *eof;
-} Source;
-
-static yue_Object *_read(yue_Context *ctx, Source *source)
+static yue_Object *yue_read(yue_Context *ctx, yue_File *source)
 {
-    while(_isspace(*source->data)) source->data++;
-    if(source->data >= source->eof) return yue_nil(ctx);
-    if(*source->data == '"') {
-        source->data++;
-        const char *start = source->data;
-        while(source->data < source->eof && *source->data != '"') source->data++;
-        size_t size = source->data - start;
-        source->data++;
+    while(_isspace(*source->ptr)) source->ptr++;
+    if(source->ptr >= source->eof) return yue_nil(ctx);
+    if(*source->ptr == '"') {
+        source->ptr++;
+        const char *start = source->ptr;
+        while(source->ptr < source->eof && *source->ptr != '"') source->ptr++;
+        size_t size = source->ptr - start;
+        source->ptr++;
         return yue_string_sized(ctx, start, size);
-    } else if(_isdigit(*source->data)) {
+    } else if(_isdigit(*source->ptr)) {
         yue_Number val = 0;
-        while(source->data < source->eof) {
-            if(_isdigit(*source->data)) {
+        while(source->ptr < source->eof) {
+            if(_isdigit(*source->ptr)) {
                 val *= 10;
-                val += *source->data - '0';
-                source->data++;
+                val += *source->ptr - '0';
+                source->ptr++;
             } else {
                 break;
             }
         }
         return yue_number(ctx, val);
-    } else if(*source->data == '(') {
-        source->data++;
-        yue_Object *r =  _read(ctx, source);
+    } else if(*source->ptr == '(') {
+        source->ptr++;
+        yue_Object *r =  yue_read(ctx, source);
         yue_Object *root = yue_pair(ctx, r, yue_nil(ctx));
         yue_Object *prev = root;
-        while(*source->data != ')') {
-            yue_Object *r = _read(ctx, source);
+        while(*source->ptr != ')') {
+            yue_Object *r = yue_read(ctx, source);
             yue_Object *curr = yue_pair(ctx, r, yue_nil(ctx));
             prev->as_pair.tail = curr;
             prev = curr;
         }
-        source->data++;
+        source->ptr++;
         return root;
     } else {
         size_t i = 0;
         char name[YUE_STRING_DATA_SIZE] = {0};
-        while(!_isspace(*source->data)) {
-            if(*source->data == '(' || *source->data == ')') break;
+        while(!_isspace(*source->ptr)) {
+            if(*source->ptr == '(' || *source->ptr == ')') break;
             if(i + 1 >= YUE_STRING_DATA_SIZE) yue_error(ctx, "symbol name is too long");
-            name[i] = *source->data;
+            name[i] = *source->ptr;
             i++;
-            source->data++;
+            source->ptr++;
         }
         name[YUE_STRING_DATA_SIZE-1] = 0;
         return yue_symbol(ctx, name);
     }
 
     return yue_nil(ctx);
-}
-
-yue_Object *yue_read(yue_Context *ctx, const char *_source, size_t _len)
-{
-    Source source_, *source;
-    source_.data = _source;
-    source_.eof  = _source + _len;
-    source = &source_;
-
-    yue_Object *r = _read(ctx, source);
-    yue_Object *root = yue_pair(ctx, r, yue_nil(ctx));
-    yue_Object *prev = root;
-    while(source->data < source->eof) {
-        while(_isspace(*source->data)) source->data++;
-        if(source->data >= source->eof) break;
-        yue_Object *r = _read(ctx, source);
-        yue_Object *curr = yue_pair(ctx, r, yue_nil(ctx));
-        prev->as_pair.tail = curr;
-        prev = curr;
-    }
-    return yue_pair(ctx, yue_cfunc(ctx, yue_builtin_dolist), root);
 }
 
 

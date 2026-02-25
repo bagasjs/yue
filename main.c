@@ -49,7 +49,7 @@ static void debug_obj(yue_Object *obj, int level) {
     }
 }
 
-char *read_entire_file(const char *filepath, size_t *size)
+bool read_entire_file(const char *filepath, yue_File *file)
 {
     FILE *f = fopen(filepath, "rb");
     if(!f) {
@@ -81,8 +81,11 @@ char *read_entire_file(const char *filepath, size_t *size)
     }
     buf[fsz] = 0;
     fclose(f);
-    if(size) *size = fsz;
-    return buf;
+    if(file) {
+        file->ptr = buf;
+        file->eof = buf + fsz;
+    }
+    return true;
 }
 
 int main(int argc, char *argv[])
@@ -93,29 +96,28 @@ int main(int argc, char *argv[])
         return -1;
     }
     size_t size = 0;
-    const char *source = read_entire_file(argv[1], &size);
-    if(!source) {
+    yue_File source = {0};
+    if(!read_entire_file(argv[1], &source)) {
         fprintf(stderr, "ERROR: failed to read file %s\n", argv[1]);
         return -1;
     }
 
-    static char buf[64 *1024];
+    static char buf[4 * 1024];
     yue_Context *ctx = yue_open(buf, sizeof(buf));
-    {
-        size_t gc = yue_savegc(ctx);
-        yue_set(ctx, yue_symbol(ctx, "print"), yue_cfunc(ctx, yue_builtin_print));
-        yue_set(ctx, yue_symbol(ctx, "+"), yue_cfunc(ctx, yue_builtin_add));
-        yue_set(ctx, yue_symbol(ctx, "="), yue_cfunc(ctx, yue_builtin_assign));
+    size_t gc = yue_savegc(ctx);
+    yue_set(ctx, yue_symbol(ctx, "print"), yue_cfunc(ctx, yue_builtin_print));
+    yue_set(ctx, yue_symbol(ctx, "+"), yue_cfunc(ctx, yue_builtin_add));
+    yue_set(ctx, yue_symbol(ctx, "="), yue_cfunc(ctx, yue_builtin_assign));
+    yue_restoregc(ctx, gc);
+
+    yue_File copy = source;
+    for(;;) {
         yue_restoregc(ctx, gc);
+        yue_Object *obj = yue_read(ctx, &copy);
+        if(yue_isnil(obj)) break;
+        yue_eval(ctx, obj);
     }
 
-    {
-        size_t gc = yue_savegc(ctx);
-        yue_Object *obj = yue_read(ctx, source, size);
-        obj = yue_eval(ctx, obj);
-        yue_restoregc(ctx, gc);
-    }
-
-    free((void*)source);
+    free((void*)source.ptr);
     return 0;
 }
