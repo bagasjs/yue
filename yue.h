@@ -60,6 +60,8 @@ yue_Object *yue_nextarg(yue_Context *ctx, yue_Object **p_arg);
 yue_Object *yue_cfunc(yue_Context *ctx, yue_CFunc cfunc);
 
 // Builtin functions
+yue_Object *yue_builtin_while(yue_Context *ctx, yue_Object *arg);
+yue_Object *yue_builtin_lt(yue_Context *ctx, yue_Object *arg);
 yue_Object *yue_builtin_print(yue_Context *ctx, yue_Object *arg);
 yue_Object *yue_builtin_add(yue_Context *ctx, yue_Object *arg);
 yue_Object *yue_builtin_dolist(yue_Context *ctx, yue_Object *arg);
@@ -515,6 +517,35 @@ yue_Object *yue_builtin_assign(yue_Context *ctx, yue_Object *arg)
     yue_Object *value  = yue_eval(ctx, yue_nextarg(ctx, &arg));
     yue_set(ctx, symbol, value);
     return yue_nil(ctx);
+}
+
+yue_Object *yue_builtin_while(yue_Context *ctx, yue_Object *arg)
+{
+    size_t global_gc = yue_savegc(ctx);
+    yue_Object *cond = yue_nextarg(ctx, &arg);
+    yue_Object *body = yue_nextarg(ctx, &arg);
+    yue_Object *res  = yue_nil(ctx);
+    size_t eval_gc = yue_savegc(ctx);
+    for(;;) {
+        yue_restoregc(ctx, eval_gc);
+        if(yue_isnil(yue_eval(ctx, cond))) break;
+        res = yue_eval(ctx, body);
+    }
+    yue_restoregc(ctx, global_gc);
+    return res;
+}
+
+yue_Object *yue_builtin_lt(yue_Context *ctx, yue_Object *arg)
+{
+    size_t gc = yue_savegc(ctx);
+    yue_Number lhs = yue_tonumber(ctx, yue_eval(ctx, yue_nextarg(ctx, &arg)));
+    yue_Number rhs = yue_tonumber(ctx, yue_eval(ctx, yue_nextarg(ctx, &arg)));
+    yue_restoregc(ctx, gc);
+    if(lhs < rhs) {
+        return yue_number(ctx, 1);
+    } else {
+        return yue_nil(ctx);
+    }
 }
 
 static inline bool _isdigit(int c) { return '0' <= c && c <= '9'; }
