@@ -1,0 +1,2 @@
+(= age 18)
+(if (< age 21) (print "You're to young!") (print "You're old enough!"))

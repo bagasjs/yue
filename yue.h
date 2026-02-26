@@ -61,6 +61,7 @@ yue_Object *yue_cfunc(yue_Context *ctx, yue_CFunc cfunc);
 
 // Builtin functions
 yue_Object *yue_builtin_while(yue_Context *ctx, yue_Object *arg);
+yue_Object *yue_builtin_if(yue_Context *ctx, yue_Object *arg);
 yue_Object *yue_builtin_lt(yue_Context *ctx, yue_Object *arg);
 yue_Object *yue_builtin_print(yue_Context *ctx, yue_Object *arg);
 yue_Object *yue_builtin_add(yue_Context *ctx, yue_Object *arg);
@@ -532,6 +533,22 @@ yue_Object *yue_builtin_while(yue_Context *ctx, yue_Object *arg)
         res = yue_eval(ctx, body);
     }
     yue_restoregc(ctx, global_gc);
+    return res;
+}
+
+yue_Object *yue_builtin_if(yue_Context *ctx, yue_Object *arg)
+{
+    yue_Object *cond = yue_nextarg(ctx, &arg);
+    yue_Object *if_true  = yue_nextarg(ctx, &arg);
+    yue_Object *if_false = yue_nextarg(ctx, &arg);
+    size_t eval_gc = yue_savegc(ctx);
+    if(!yue_isnil(yue_eval(ctx, cond))) {
+        yue_eval(ctx, if_true);
+    } else {
+        yue_eval(ctx, if_false);
+    }
+    yue_restoregc(ctx, eval_gc);
+    yue_Object *res  = yue_nil(ctx);
     return res;
 }
 

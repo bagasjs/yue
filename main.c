@@ -102,7 +102,7 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    static char buf[4 * 1024];
+    static char buf[8 * 1024];
     yue_Context *ctx = yue_open(buf, sizeof(buf));
     size_t gc = yue_savegc(ctx);
     yue_set(ctx, yue_symbol(ctx, "print"), yue_cfunc(ctx, yue_builtin_print));
@@ -111,6 +111,7 @@ int main(int argc, char *argv[])
     yue_set(ctx, yue_symbol(ctx, "<"), yue_cfunc(ctx, yue_builtin_lt));
     yue_set(ctx, yue_symbol(ctx, "do"), yue_cfunc(ctx, yue_builtin_dolist));
     yue_set(ctx, yue_symbol(ctx, "while"), yue_cfunc(ctx, yue_builtin_while));
+    yue_set(ctx, yue_symbol(ctx, "if"), yue_cfunc(ctx, yue_builtin_if));
     yue_restoregc(ctx, gc);
 
     yue_File copy = source;
