@@ -1,0 +1,5 @@
+(= file (openfile "./README.md"))
+(if (not file) (do
+    (print "Could not open file")
+    (exit 1)))
+(closefile file)

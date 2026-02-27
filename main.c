@@ -21,6 +21,9 @@ static void debug_obj(yue_Object *obj, int level) {
         case YUE_OBJECT_SYMBOL:
             printf("%.*s\n", YUE_STRING_DATA_SIZE, obj->as_symbol.name);
             break;
+        case YUE_OBJECT_USERDATA:
+            printf("userdata(%p)\n", obj->as_userdata);
+            break;
         case YUE_OBJECT_STRING:
             { 
                 printf("string(");
@@ -29,8 +32,7 @@ static void debug_obj(yue_Object *obj, int level) {
                     yue_Object *tail = curr->as_str.tail;
                     if(tail) {
                         printf("%.*s", YUE_STRING_DATA_SIZE, curr->as_str.data);
-                    }
-                    else {
+                    } else {
                         printf("%s", curr->as_str.data);
                     }
                     curr = tail;
@@ -82,10 +84,37 @@ bool read_entire_file(const char *filepath, yue_File *file)
     buf[fsz] = 0;
     fclose(f);
     if(file) {
+        file->fst = buf;
         file->ptr = buf;
         file->eof = buf + fsz;
     }
     return true;
+}
+
+#include <stdlib.h>
+yue_Object *yue_builtin_openfile(yue_Context *ctx, yue_Object *arg)
+{
+    size_t gc = yue_savegc(ctx);
+    char buf[256] = {0};
+    yue_Object *x = yue_eval(ctx, yue_nextarg(ctx, &arg));
+    const char *filename = yue_tostring(ctx, x, buf, sizeof(buf));
+    printf("'%s' '%s'\n", filename, buf);
+    yue_File *file = malloc(sizeof(*file));
+    if(!read_entire_file(filename, file)) {
+        yue_restoregc(ctx, gc);
+        return yue_nil(ctx);
+    }
+    yue_restoregc(ctx, gc);
+    return yue_userdata(ctx, file);
+}
+
+yue_Object *yue_builtin_closefile(yue_Context *ctx, yue_Object *arg)
+{
+    size_t gc = yue_savegc(ctx);
+    yue_File *file = yue_touserdata(ctx, yue_eval(ctx, yue_nextarg(ctx, &arg)));
+    free((void*)file->fst);
+    yue_restoregc(ctx, gc);
+    return yue_nil(ctx);
 }
 
 int main(int argc, char *argv[])
@@ -108,10 +137,15 @@ int main(int argc, char *argv[])
     yue_set(ctx, yue_symbol(ctx, "print"), yue_cfunc(ctx, yue_builtin_print));
     yue_set(ctx, yue_symbol(ctx, "+"), yue_cfunc(ctx, yue_builtin_add));
     yue_set(ctx, yue_symbol(ctx, "="), yue_cfunc(ctx, yue_builtin_assign));
+    yue_set(ctx, yue_symbol(ctx, "not"), yue_cfunc(ctx, yue_builtin_not));
+    yue_set(ctx, yue_symbol(ctx, "exit"), yue_cfunc(ctx, yue_builtin_exit));
     yue_set(ctx, yue_symbol(ctx, "<"), yue_cfunc(ctx, yue_builtin_lt));
     yue_set(ctx, yue_symbol(ctx, "do"), yue_cfunc(ctx, yue_builtin_dolist));
     yue_set(ctx, yue_symbol(ctx, "while"), yue_cfunc(ctx, yue_builtin_while));
     yue_set(ctx, yue_symbol(ctx, "if"), yue_cfunc(ctx, yue_builtin_if));
+
+    yue_set(ctx, yue_symbol(ctx, "openfile"), yue_cfunc(ctx, yue_builtin_openfile));
+    yue_set(ctx, yue_symbol(ctx, "closefile"), yue_cfunc(ctx, yue_builtin_closefile));
     yue_restoregc(ctx, gc);
 
     yue_File copy = source;

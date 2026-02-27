@@ -21,10 +21,14 @@ typedef enum {
     YUE_OBJECT_STRING,
     YUE_OBJECT_SYMBOL,
     YUE_OBJECT_CFUNC,
+    YUE_OBJECT_USERDATA,
 } yue_ObjectType;
 
 typedef struct yue_File {
-    // pointer to the first character in the string
+    // the real first character in the entire file
+    const char *fst;
+    // pointer to the first character in the string 
+    // (this can be offset-ed useful for slicing)
     const char *ptr;
     // .ptr + length of file
     const char *eof;
@@ -49,10 +53,12 @@ yue_Object *yue_list(yue_Context *ctx, yue_Object **objs, size_t count);
 yue_Object *yue_string_sized(yue_Context *ctx, const char *cstr, size_t n);
 yue_Object *yue_string(yue_Context *ctx, const char *cstr);
 yue_Object *yue_symbol(yue_Context *ctx, const char *name);
+yue_Object *yue_userdata(yue_Context *ctx, void *userdata);
 
 // Object accessor
 bool yue_isnil(yue_Object *obj);
 yue_Number yue_tonumber(yue_Context *ctx, yue_Object *obj);
+void *yue_touserdata(yue_Context *ctx, yue_Object *obj);
 size_t yue_getstringlen(yue_Context *ctx, yue_Object *obj);
 char *yue_tostring(yue_Context *ctx, yue_Object *obj, char *dst, size_t dstsz);
 
@@ -67,6 +73,8 @@ yue_Object *yue_builtin_print(yue_Context *ctx, yue_Object *arg);
 yue_Object *yue_builtin_add(yue_Context *ctx, yue_Object *arg);
 yue_Object *yue_builtin_dolist(yue_Context *ctx, yue_Object *arg);
 yue_Object *yue_builtin_assign(yue_Context *ctx, yue_Object *arg);
+yue_Object *yue_builtin_not(yue_Context *ctx, yue_Object *arg);
+yue_Object *yue_builtin_exit(yue_Context *ctx, yue_Object *arg);
 
 #endif // YUE_H_
 
@@ -98,6 +106,7 @@ struct yue_Object {
             char name[YUE_STRING_DATA_SIZE];
             yue_Object *value;
         } as_symbol;
+        void *as_userdata;
     };
 };
 
@@ -157,6 +166,7 @@ yue_Object *yue_eval(yue_Context *ctx, yue_Object *obj)
         case YUE_OBJECT_NUMBER:
         case YUE_OBJECT_CFUNC:
         case YUE_OBJECT_STRING:
+        case YUE_OBJECT_USERDATA:
             return obj;
         case YUE_OBJECT_SYMBOL:
             return obj->as_symbol.value;
@@ -193,12 +203,13 @@ yue_Object *yue_get(yue_Context *ctx, yue_Object *sym)
 static size_t gc_run_idx = 0;
 
 static const char *type_names[] = {
-    "YUE_OBJECT_NIL",
-    "YUE_OBJECT_NUMBER",
-    "YUE_OBJECT_PAIR",
-    "YUE_OBJECT_STRING",
-    "YUE_OBJECT_SYMBOL",
-    "YUE_OBJECT_CFUNC",
+    [YUE_OBJECT_NIL] = "YUE_OBJECT_NIL",
+    [YUE_OBJECT_NUMBER] = "YUE_OBJECT_NUMBER",
+    [YUE_OBJECT_PAIR] = "YUE_OBJECT_PAIR",
+    [YUE_OBJECT_STRING] = "YUE_OBJECT_STRING",
+    [YUE_OBJECT_SYMBOL] = "YUE_OBJECT_SYMBOL",
+    [YUE_OBJECT_USERDATA] = "YUE_OBJECT_USERDATA",
+    [YUE_OBJECT_CFUNC] = "YUE_OBJECT_CFUNC",
 };
 
 static void mark(yue_Context *ctx, yue_Object *obj)
@@ -285,6 +296,14 @@ static yue_Object *new_object(yue_Context *ctx, yue_ObjectType type)
 yue_Object *yue_nil(yue_Context *ctx)
 {
     yue_Object *obj = ctx->nil;
+    return obj;
+}
+
+yue_Object *yue_userdata(yue_Context *ctx, void *userdata)
+{
+    yue_Object *obj = new_object(ctx, YUE_OBJECT_USERDATA);
+    obj->as_userdata = userdata;
+    yue_pushgc(ctx, obj);
     return obj;
 }
 
@@ -409,29 +428,41 @@ size_t yue_getstringlen(yue_Context *ctx, yue_Object *obj)
 char *yue_tostring(yue_Context *ctx, yue_Object *obj, char *dst, size_t dstsz)
 {
     if(obj->type != YUE_OBJECT_STRING) yue_error(ctx, "Expected a string");
+    memset(dst, 0, dstsz);
     char *base = dst;
-    size_t baselen = dstsz;
+    int cap = dstsz;
     yue_Object *curr = obj;
     while(curr) {
         yue_Object *tail = curr->as_str.tail;
         if(tail) {
-            size_t n = dstsz < YUE_STRING_DATA_SIZE ? dstsz : YUE_STRING_DATA_SIZE;
+            size_t n = cap < YUE_STRING_DATA_SIZE ? cap : YUE_STRING_DATA_SIZE;
             memcpy(dst, curr->as_str.data, n);
-            dstsz -= n;
+            base += n;
+            cap -= n;
         } else {
             size_t i = 0;
-            while(curr->as_str.data[i++] != 0) dstsz--;
+            while(cap > 1 && curr->as_str.data[i] != 0) {
+                *base++ = curr->as_str.data[i];
+                i += 1;
+                cap -= 1;
+            }
         }
         curr = tail;
     }
-    base[baselen - 1] = 0;
-    return base;
+    dst[dstsz - 1] = 0;
+    return dst;
 }
 
 yue_Number yue_tonumber(yue_Context *ctx, yue_Object *obj)
 {
     if(obj->type != YUE_OBJECT_NUMBER) yue_error(ctx, "Expected a number");
     return obj->as_number;
+}
+
+void *yue_touserdata(yue_Context *ctx, yue_Object *obj)
+{
+    if(obj->type != YUE_OBJECT_USERDATA) yue_error(ctx, "Expected an userdata");
+    return obj->as_userdata;
 }
 
 
@@ -448,6 +479,9 @@ static void print_object_inner(yue_Object *obj, int level)
             break;
         case YUE_OBJECT_CFUNC:
             printf("<cfunc>");
+            break;
+        case YUE_OBJECT_USERDATA:
+            printf("<userdata: %p>", obj->as_userdata);
             break;
         case YUE_OBJECT_NUMBER:
             printf("%f", obj->as_number);
@@ -563,6 +597,27 @@ yue_Object *yue_builtin_lt(yue_Context *ctx, yue_Object *arg)
     } else {
         return yue_nil(ctx);
     }
+}
+
+yue_Object *yue_builtin_not(yue_Context *ctx, yue_Object *arg)
+{
+    size_t gc = yue_savegc(ctx);
+    yue_Object *any = yue_eval(ctx, yue_nextarg(ctx, &arg));
+    bool isnil = yue_isnil(any);
+    yue_restoregc(ctx, gc);
+    return isnil ? yue_number(ctx, 1) : yue_nil(ctx);
+}
+
+yue_Object *yue_builtin_exit(yue_Context *ctx, yue_Object *arg)
+{
+    size_t gc = yue_savegc(ctx);
+    int exit_code = yue_tonumber(ctx, yue_eval(ctx, yue_nextarg(ctx, &arg)));
+    yue_restoregc(ctx, gc);
+    // TODO: maybe exit should be a flag in ctx that we can change 
+    //       so when it's exit we refuse to do anymore evaluation
+    //       or spit error.
+    exit(exit_code);
+    return yue_nil(ctx);
 }
 
 static inline bool _isdigit(int c) { return '0' <= c && c <= '9'; }
