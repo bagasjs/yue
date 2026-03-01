@@ -18,6 +18,9 @@ static void debug_obj(yue_Object *obj, int level) {
         case YUE_OBJECT_CFUNC:
             printf("cfunc(%p)\n", obj->as_cfunc);
             break;
+        case YUE_OBJECT_FUNC:
+            printf("func(%p)\n", obj->as_cfunc);
+            break;
         case YUE_OBJECT_SYMBOL:
             printf("%.*s\n", YUE_STRING_DATA_SIZE, obj->as_symbol.name);
             break;
@@ -117,6 +120,13 @@ yue_Object *yue_builtin_closefile(yue_Context *ctx, yue_Object *arg)
     return yue_nil(ctx);
 }
 
+yue_Object *yue_builtin_fn(yue_Context *ctx, yue_Object *arg)
+{
+    yue_Object *params = yue_nextarg(ctx, &arg);
+    yue_Object *body   = yue_nextarg(ctx, &arg);
+    return yue_func(ctx, params, body);
+}
+
 int main(int argc, char *argv[])
 {
     if(argc < 2) {
@@ -143,6 +153,7 @@ int main(int argc, char *argv[])
     yue_set(ctx, yue_symbol(ctx, "do"), yue_cfunc(ctx, yue_builtin_dolist));
     yue_set(ctx, yue_symbol(ctx, "while"), yue_cfunc(ctx, yue_builtin_while));
     yue_set(ctx, yue_symbol(ctx, "if"), yue_cfunc(ctx, yue_builtin_if));
+    yue_set(ctx, yue_symbol(ctx, "fn"), yue_cfunc(ctx, yue_builtin_fn));
 
     yue_set(ctx, yue_symbol(ctx, "openfile"), yue_cfunc(ctx, yue_builtin_openfile));
     yue_set(ctx, yue_symbol(ctx, "closefile"), yue_cfunc(ctx, yue_builtin_closefile));

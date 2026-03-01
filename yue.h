@@ -20,6 +20,7 @@ typedef enum {
     YUE_OBJECT_PAIR,
     YUE_OBJECT_STRING,
     YUE_OBJECT_SYMBOL,
+    YUE_OBJECT_FUNC,
     YUE_OBJECT_CFUNC,
     YUE_OBJECT_USERDATA,
 } yue_ObjectType;
@@ -45,6 +46,13 @@ void yue_set(yue_Context *ctx, yue_Object *sym, yue_Object *value);
 // This will read a single top object and modify the file
 yue_Object *yue_read(yue_Context *ctx, yue_File *file);
 
+// Object accessor
+bool yue_isnil(yue_Object *obj);
+yue_Number yue_tonumber(yue_Context *ctx, yue_Object *obj);
+void *yue_touserdata(yue_Context *ctx, yue_Object *obj);
+size_t yue_getstringlen(yue_Context *ctx, yue_Object *obj);
+char *yue_tostring(yue_Context *ctx, yue_Object *obj, char *dst, size_t dstsz);
+
 // Object constructor
 yue_Object *yue_nil(yue_Context *ctx);
 yue_Object *yue_number(yue_Context *ctx, yue_Number number);
@@ -54,13 +62,7 @@ yue_Object *yue_string_sized(yue_Context *ctx, const char *cstr, size_t n);
 yue_Object *yue_string(yue_Context *ctx, const char *cstr);
 yue_Object *yue_symbol(yue_Context *ctx, const char *name);
 yue_Object *yue_userdata(yue_Context *ctx, void *userdata);
-
-// Object accessor
-bool yue_isnil(yue_Object *obj);
-yue_Number yue_tonumber(yue_Context *ctx, yue_Object *obj);
-void *yue_touserdata(yue_Context *ctx, yue_Object *obj);
-size_t yue_getstringlen(yue_Context *ctx, yue_Object *obj);
-char *yue_tostring(yue_Context *ctx, yue_Object *obj, char *dst, size_t dstsz);
+yue_Object *yue_func(yue_Context *ctx, yue_Object *params, yue_Object *body);
 
 yue_Object *yue_nextarg(yue_Context *ctx, yue_Object **p_arg);
 yue_Object *yue_cfunc(yue_Context *ctx, yue_CFunc cfunc);
@@ -106,6 +108,10 @@ struct yue_Object {
             char name[YUE_STRING_DATA_SIZE];
             yue_Object *value;
         } as_symbol;
+        struct {
+            yue_Object *params;
+            yue_Object *body;
+        } as_func;
         void *as_userdata;
     };
 };
@@ -116,6 +122,7 @@ struct yue_Context {
 
     yue_Object *nil;
 
+    yue_Object *call_stack;
     yue_Object *free_list;
     yue_Object *sym_list;
     yue_Object *objects;
@@ -167,6 +174,7 @@ yue_Object *yue_eval(yue_Context *ctx, yue_Object *obj)
         case YUE_OBJECT_CFUNC:
         case YUE_OBJECT_STRING:
         case YUE_OBJECT_USERDATA:
+        case YUE_OBJECT_FUNC:
             return obj;
         case YUE_OBJECT_SYMBOL:
             return obj->as_symbol.value;
@@ -176,6 +184,19 @@ yue_Object *yue_eval(yue_Context *ctx, yue_Object *obj)
                 yue_Object *arg = obj->as_pair.tail;
                 fn = yue_eval(ctx, fn);
                 switch(fn->type) {
+                case YUE_OBJECT_FUNC:
+                    {
+                        yue_Object *symbols = fn->as_func.params;
+                        yue_Object *a = NULL;
+                        while(true) {
+                            if(yue_isnil((a = yue_nextarg(ctx, &arg)))) break;
+                            if(yue_isnil(symbols)) break;
+                            yue_Object *head = symbols->as_pair.head;
+                            if(head->type != YUE_OBJECT_SYMBOL) yue_error(ctx, "Function parameter is not a symbol");
+                            head->as_symbol.value = yue_eval(ctx, a);
+                        }
+                        return yue_eval(ctx, fn->as_func.body);
+                    }
                 case YUE_OBJECT_CFUNC:
                     return fn->as_cfunc(ctx, arg);
                 default:
@@ -186,6 +207,7 @@ yue_Object *yue_eval(yue_Context *ctx, yue_Object *obj)
         default:
             return obj;
     }
+    return obj;
 }
 
 void yue_set(yue_Context *ctx, yue_Object *sym, yue_Object *value)
@@ -209,6 +231,7 @@ static const char *type_names[] = {
     [YUE_OBJECT_STRING] = "YUE_OBJECT_STRING",
     [YUE_OBJECT_SYMBOL] = "YUE_OBJECT_SYMBOL",
     [YUE_OBJECT_USERDATA] = "YUE_OBJECT_USERDATA",
+    [YUE_OBJECT_FUNC] = "YUE_OBJECT_FUNC",
     [YUE_OBJECT_CFUNC] = "YUE_OBJECT_CFUNC",
 };
 
@@ -338,6 +361,20 @@ yue_Object *yue_symbol(yue_Context *ctx, const char *name)
 {
     size_t name_len = strlen(name);
     if(name_len + 1 > YUE_STRING_DATA_SIZE) yue_error(ctx, "symbol name is too long\n");
+
+    yue_Object *call = ctx->call_stack;
+    while(call) {
+        yue_Object *list = call->as_func.params;
+        while(!yue_isnil(list)) {
+            yue_Object *head = list->as_pair.head;
+            if(strcmp(head->as_symbol.name, name) == 0) {
+                yue_pushgc(ctx, head);
+                return head;
+            }
+            list = list->as_pair.tail;
+        }
+    }
+
     yue_Object *obj = ctx->sym_list;
     while(obj) {
         if(strcmp(obj->as_symbol.name, name) == 0) {
@@ -384,6 +421,15 @@ yue_Object *yue_string(yue_Context *ctx, const char *cstr)
     return yue_string_sized(ctx, cstr, strlen(cstr));
 }
 
+yue_Object *yue_func(yue_Context *ctx, yue_Object *params, yue_Object *body)
+{
+    yue_Object *obj = new_object(ctx, YUE_OBJECT_FUNC);
+    obj->as_func.body = body;
+    obj->as_func.params = params;
+    yue_pushgc(ctx, obj);
+    return obj;
+}
+
 yue_Object *yue_cfunc(yue_Context *ctx, yue_CFunc cfunc)
 {
     yue_Object *obj = new_object(ctx, YUE_OBJECT_CFUNC);
@@ -405,6 +451,16 @@ yue_Object *yue_nextarg(yue_Context *ctx, yue_Object **p_arg)
 bool yue_isnil(yue_Object *obj)
 {
     return obj->type == YUE_OBJECT_NIL;
+}
+
+bool yue_isfunc(yue_Object *obj)
+{
+    return obj->type == YUE_OBJECT_FUNC;
+}
+
+bool yue_islist(yue_Object *obj)
+{
+    return obj->type == YUE_OBJECT_PAIR;
 }
 
 size_t yue_getstringlen(yue_Context *ctx, yue_Object *obj)
@@ -479,6 +535,9 @@ static void print_object_inner(yue_Object *obj, int level)
             break;
         case YUE_OBJECT_CFUNC:
             printf("<cfunc>");
+            break;
+        case YUE_OBJECT_FUNC:
+            printf("<func>");
             break;
         case YUE_OBJECT_USERDATA:
             printf("<userdata: %p>", obj->as_userdata);
