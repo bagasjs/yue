@@ -6,7 +6,7 @@
 #define YUE_IMPLEMENTATION
 #include "yue.h"
 
-static void debug_obj(yue_Object *obj, int level) { 
+static void dump_obj(yue_Object *obj, int level) { 
     printf("%*s> ", (level * 2), "");
     switch(obj->type) { 
         case YUE_OBJECT_NIL:
@@ -47,7 +47,7 @@ static void debug_obj(yue_Object *obj, int level) {
             {
                 printf("pair: \n");
                 while(!yue_isnil(obj)) {
-                    debug_obj(obj->as_pair.head, level + 1);
+                    dump_obj(obj->as_pair.head, level + 1);
                     obj = obj->as_pair.tail;
                 }
             } break;
@@ -125,6 +125,19 @@ yue_Object *yue_builtin_fn(yue_Context *ctx, yue_Object *arg)
     yue_Object *params = yue_nextarg(ctx, &arg);
     yue_Object *body   = yue_nextarg(ctx, &arg);
     return yue_func(ctx, params, body);
+}
+
+void dump_ctx(yue_Context *ctx)
+{
+    printf("Variables:\n");
+    for(size_t i = 0; i < ctx->scope_size; ++i) {
+        yue_Object *obj = ctx->scope[i];
+        while(obj) {
+            if(obj->type != YUE_OBJECT_SYMBOL) yue_error(ctx, "what the fuck at scope %zu", i);
+            printf("[SCOPE=%zu] %s %s\n", i, obj->as_symbol.name, _yue_type_names[obj->as_symbol.value->type]);
+            obj = obj->next;
+        }
+    }
 }
 
 int main(int argc, char *argv[])

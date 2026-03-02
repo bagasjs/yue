@@ -9,6 +9,10 @@
 #define YUE_STACK_CAP 256
 #endif
 
+#ifndef YUE_MAX_SCOPE_DEPTH
+#define YUE_MAX_SCOPE_DEPTH 64
+#endif
+
 typedef struct yue_Context yue_Context; 
 typedef struct yue_Object yue_Object;
 typedef yue_Object *(*yue_CFunc)(yue_Context *ctx, yue_Object *arg);
@@ -121,11 +125,11 @@ struct yue_Object {
 struct yue_Context {
     yue_Object *stack[YUE_STACK_CAP];
     size_t stack_size;
-
+    yue_Object *scope[YUE_MAX_SCOPE_DEPTH];
+    size_t scope_size;
     yue_Object *nil;
 
     yue_Object *free_list;
-    yue_Object *sym_list;
     yue_Object *objects;
     size_t count_objects;
 };
@@ -168,6 +172,7 @@ yue_Context *yue_open(void *buf, size_t bufsz)
     buf    = (char*)buf + sizeof(*nil);
     bufsz -= sizeof(*nil);
 
+    ctx->scope_size    = 1; // global scope
     ctx->objects       = (yue_Object*)buf;
     ctx->count_objects = bufsz / sizeof(*ctx->objects);
 
@@ -195,27 +200,31 @@ yue_Object *yue_eval(yue_Context *ctx, yue_Object *obj)
         case YUE_OBJECT_FUNC:
             return obj;
         case YUE_OBJECT_SYMBOL:
-            return obj->as_symbol.value;
+            return yue_get(ctx, obj);
         case YUE_OBJECT_PAIR:
             {
-                yue_Object *fn  = obj->as_pair.head;
+                yue_Object *base = obj->as_pair.head;
                 yue_Object *arg = obj->as_pair.tail;
-                fn = yue_eval(ctx, fn);
+                yue_Object *fn = yue_eval(ctx, base);
                 switch(fn->type) {
                 case YUE_OBJECT_FUNC:
                     {
+                        ctx->scope_size += 1;
                         yue_Object *symbols = fn->as_func.params;
+                        // load params
                         yue_Object *a = NULL;
                         while(true) {
                             if(yue_isnil((a = yue_nextarg(ctx, &arg)))) break;
                             if(yue_isnil(symbols)) break;
-                            yue_Object *head = symbols->as_pair.head;
-                            if(head->type != YUE_OBJECT_SYMBOL) 
+                            yue_Object *symbol= symbols->as_pair.head;
+                            if(symbol->type != YUE_OBJECT_SYMBOL) 
                                 yue_error(ctx, "Function parameter is not a symbol but %s", 
-                                        _yue_type_names[head->type]);
-                            head->as_symbol.value = yue_eval(ctx, a);
+                                        _yue_type_names[symbol->type]);
+                            yue_set(ctx, symbol, yue_eval(ctx, a));
                         }
-                        return yue_eval(ctx, fn->as_func.body);
+                        yue_Object *obj = yue_eval(ctx, fn->as_func.body);
+                        ctx->scope_size -= 1;
+                        return obj;
                     }
                 case YUE_OBJECT_CFUNC:
                     return fn->as_cfunc(ctx, arg);
@@ -230,20 +239,6 @@ yue_Object *yue_eval(yue_Context *ctx, yue_Object *obj)
     return obj;
 }
 
-void yue_set(yue_Context *ctx, yue_Object *sym, yue_Object *value)
-{
-    if(sym->type != YUE_OBJECT_SYMBOL) yue_error(ctx, "set require the first argument to be symbol\n");
-    sym->as_symbol.value = value;
-}
-
-yue_Object *yue_get(yue_Context *ctx, yue_Object *sym)
-{
-    if(sym->type != YUE_OBJECT_SYMBOL) yue_error(ctx, "set require the first argument to be symbol\n");
-    return sym->as_symbol.value;
-}
-
-static size_t gc_run_idx = 0;
-
 static void mark(yue_Context *ctx, yue_Object *obj)
 {
     assert(obj && "Invalid object");
@@ -256,6 +251,9 @@ static void mark(yue_Context *ctx, yue_Object *obj)
     } else if(obj->type == YUE_OBJECT_STRING) {
         yue_Object *tail = obj->as_str.tail;
         if(tail) mark(ctx, tail);
+    } else if(obj->type == YUE_OBJECT_FUNC) {
+        mark(ctx, obj->as_func.params);
+        mark(ctx, obj->as_func.body);
     }
 }
 
@@ -264,11 +262,12 @@ static void mark_all(yue_Context *ctx)
     for(size_t i = 0; i < ctx->stack_size; ++i) {
         mark(ctx, ctx->stack[i]);
     }
-    yue_Object *obj = ctx->sym_list;
-    while(obj) {
-        mark(ctx, obj);
-        mark(ctx, obj->as_symbol.value);
-        obj = obj->next;
+    for(size_t i = 0; i < ctx->scope_size; ++i) {
+        yue_Object *obj = ctx->scope[i];
+        while(obj) {
+            mark(ctx, obj);
+            mark(ctx, obj->as_symbol.value);
+        }
     }
 }
 
@@ -290,7 +289,6 @@ void yue_rungc(yue_Context *ctx)
 {
     mark_all(ctx);
     sweep(ctx);
-    gc_run_idx += 1;
 }
 
 size_t yue_savegc(yue_Context *ctx)
@@ -303,12 +301,51 @@ void yue_restoregc(yue_Context *ctx, size_t gc)
     ctx->stack_size = gc;
 }
 
-void yue_pushgc(yue_Context *ctx, yue_Object *obj)
+static void yue_pushgc(yue_Context *ctx, yue_Object *obj)
 {
     assert(obj && "Invalid object to push");
     if(ctx->stack_size >= YUE_STACK_CAP) yue_error(ctx, "Stack overflow!");
     ctx->stack[ctx->stack_size++] = obj;
 }
+
+void yue_set(yue_Context *ctx, yue_Object *sym, yue_Object *value)
+{
+    if(sym->type != YUE_OBJECT_SYMBOL) yue_error(ctx, "set require the first argument to be symbol\n");
+    for(int i = (int)ctx->scope_size - 1; i >= 0; --i) {
+        yue_Object *obj = ctx->scope[i];
+        while(obj) {
+            if(obj->type == YUE_OBJECT_SYMBOL) {
+                if(strcmp(sym->as_symbol.name, obj->as_symbol.name) == 0) {
+                    obj->as_symbol.value = value;
+                    yue_pushgc(ctx, obj);
+                    return;
+                }
+            }
+            obj = obj->next;
+        }
+    }
+    sym->as_symbol.value = value;
+    sym->next = ctx->scope[ctx->scope_size - 1];
+    ctx->scope[ctx->scope_size - 1] = sym;
+}
+
+yue_Object *yue_get(yue_Context *ctx, yue_Object *sym)
+{
+    if(sym->type != YUE_OBJECT_SYMBOL) yue_error(ctx, "set require the first argument to be symbol\n");
+    for(int i = (int)ctx->scope_size - 1; i >= 0; --i) {
+        yue_Object *obj = ctx->scope[i];
+        while(obj) {
+            if(obj->type == YUE_OBJECT_SYMBOL) {
+                if(strcmp(sym->as_symbol.name, obj->as_symbol.name) == 0) {
+                    return obj->as_symbol.value;
+                }
+            }
+            obj = obj->next;
+        }
+    }
+    return yue_nil(ctx);
+}
+
 
 static yue_Object *new_object(yue_Context *ctx, yue_ObjectType type)
 {
@@ -368,26 +405,16 @@ yue_Object *yue_list(yue_Context *ctx, yue_Object **objs, size_t count)
 
 yue_Object *yue_symbol(yue_Context *ctx, const char *name)
 {
+    assert(ctx->scope_size > 0);
+
     size_t name_len = strlen(name);
     if(name_len + 1 > YUE_STRING_DATA_SIZE) 
         yue_error(ctx, "symbol name '%s' is too long. It's length is %zu but maximum length is %d\n", 
                 name, name_len + 1, YUE_STRING_DATA_SIZE);
 
-    yue_Object *obj = ctx->sym_list;
-    while(obj) {
-        if(strcmp(obj->as_symbol.name, name) == 0) {
-            yue_pushgc(ctx, obj);
-            return obj;
-        }
-        obj = obj->next;
-    }
-
-    obj = new_object(ctx, YUE_OBJECT_SYMBOL);
+    yue_Object *obj = new_object(ctx, YUE_OBJECT_SYMBOL);
     memcpy(obj->as_symbol.name, name, name_len);
     obj->as_symbol.value = yue_nil(ctx);
-    obj->next = ctx->sym_list;
-    ctx->sym_list = obj;
-    yue_pushgc(ctx, obj);
     return obj;
 }
 
