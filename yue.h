@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdarg.h>
 
 #ifndef YUE_STACK_CAP
 #define YUE_STACK_CAP 256
@@ -77,6 +78,7 @@ yue_Object *yue_builtin_dolist(yue_Context *ctx, yue_Object *arg);
 yue_Object *yue_builtin_assign(yue_Context *ctx, yue_Object *arg);
 yue_Object *yue_builtin_not(yue_Context *ctx, yue_Object *arg);
 yue_Object *yue_builtin_exit(yue_Context *ctx, yue_Object *arg);
+void yue_load_builtins(yue_Context *ctx);
 
 #endif // YUE_H_
 
@@ -88,7 +90,7 @@ yue_Object *yue_builtin_exit(yue_Context *ctx, yue_Object *arg);
 #include <stdlib.h>
 #include <string.h>
 
-#define YUE_STRING_DATA_SIZE 16
+#define YUE_STRING_DATA_SIZE 32
 struct yue_Object {
     yue_ObjectType type;
     yue_Object *next;
@@ -128,10 +130,27 @@ struct yue_Context {
     size_t count_objects;
 };
 
-void yue_error(yue_Context *ctx, const char *message)
+static const char *_yue_type_names[] = {
+    [YUE_OBJECT_NIL] = "YUE_OBJECT_NIL",
+    [YUE_OBJECT_NUMBER] = "YUE_OBJECT_NUMBER",
+    [YUE_OBJECT_PAIR] = "YUE_OBJECT_PAIR",
+    [YUE_OBJECT_STRING] = "YUE_OBJECT_STRING",
+    [YUE_OBJECT_SYMBOL] = "YUE_OBJECT_SYMBOL",
+    [YUE_OBJECT_USERDATA] = "YUE_OBJECT_USERDATA",
+    [YUE_OBJECT_FUNC] = "YUE_OBJECT_FUNC",
+    [YUE_OBJECT_CFUNC] = "YUE_OBJECT_CFUNC",
+};
+
+
+void yue_error(yue_Context *ctx, const char *fmt, ...)
 {
     (void)ctx;
-    fprintf(stderr, "ERROR: %s\n", message);
+    fprintf(stderr, "ERROR: ");
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(stderr, fmt, args);
+    va_end(args);
+    fprintf(stderr, "\n");
     exit(EXIT_FAILURE);
 }
 
@@ -191,7 +210,9 @@ yue_Object *yue_eval(yue_Context *ctx, yue_Object *obj)
                             if(yue_isnil((a = yue_nextarg(ctx, &arg)))) break;
                             if(yue_isnil(symbols)) break;
                             yue_Object *head = symbols->as_pair.head;
-                            if(head->type != YUE_OBJECT_SYMBOL) yue_error(ctx, "Function parameter is not a symbol");
+                            if(head->type != YUE_OBJECT_SYMBOL) 
+                                yue_error(ctx, "Function parameter is not a symbol but %s", 
+                                        _yue_type_names[head->type]);
                             head->as_symbol.value = yue_eval(ctx, a);
                         }
                         return yue_eval(ctx, fn->as_func.body);
@@ -199,7 +220,7 @@ yue_Object *yue_eval(yue_Context *ctx, yue_Object *obj)
                 case YUE_OBJECT_CFUNC:
                     return fn->as_cfunc(ctx, arg);
                 default:
-                    yue_error(ctx, "Invoking non callable object");
+                    yue_error(ctx, "Invoking non callable object %s", _yue_type_names[fn->type]);
                     return obj;
                 }
             } break;
@@ -222,17 +243,6 @@ yue_Object *yue_get(yue_Context *ctx, yue_Object *sym)
 }
 
 static size_t gc_run_idx = 0;
-
-static const char *type_names[] = {
-    [YUE_OBJECT_NIL] = "YUE_OBJECT_NIL",
-    [YUE_OBJECT_NUMBER] = "YUE_OBJECT_NUMBER",
-    [YUE_OBJECT_PAIR] = "YUE_OBJECT_PAIR",
-    [YUE_OBJECT_STRING] = "YUE_OBJECT_STRING",
-    [YUE_OBJECT_SYMBOL] = "YUE_OBJECT_SYMBOL",
-    [YUE_OBJECT_USERDATA] = "YUE_OBJECT_USERDATA",
-    [YUE_OBJECT_FUNC] = "YUE_OBJECT_FUNC",
-    [YUE_OBJECT_CFUNC] = "YUE_OBJECT_CFUNC",
-};
 
 static void mark(yue_Context *ctx, yue_Object *obj)
 {
@@ -359,7 +369,9 @@ yue_Object *yue_list(yue_Context *ctx, yue_Object **objs, size_t count)
 yue_Object *yue_symbol(yue_Context *ctx, const char *name)
 {
     size_t name_len = strlen(name);
-    if(name_len + 1 > YUE_STRING_DATA_SIZE) yue_error(ctx, "symbol name is too long\n");
+    if(name_len + 1 > YUE_STRING_DATA_SIZE) 
+        yue_error(ctx, "symbol name '%s' is too long. It's length is %zu but maximum length is %d\n", 
+                name, name_len + 1, YUE_STRING_DATA_SIZE);
 
     yue_Object *obj = ctx->sym_list;
     while(obj) {
@@ -719,6 +731,21 @@ static yue_Object *yue_read(yue_Context *ctx, yue_File *source)
     }
 
     return yue_nil(ctx);
+}
+
+void yue_load_builtins(yue_Context *ctx)
+{
+    size_t gc = yue_savegc(ctx);
+    yue_set(ctx, yue_symbol(ctx, "print"), yue_cfunc(ctx, yue_builtin_print));
+    yue_set(ctx, yue_symbol(ctx, "+"), yue_cfunc(ctx, yue_builtin_add));
+    yue_set(ctx, yue_symbol(ctx, "="), yue_cfunc(ctx, yue_builtin_assign));
+    yue_set(ctx, yue_symbol(ctx, "not"), yue_cfunc(ctx, yue_builtin_not));
+    yue_set(ctx, yue_symbol(ctx, "exit"), yue_cfunc(ctx, yue_builtin_exit));
+    yue_set(ctx, yue_symbol(ctx, "<"), yue_cfunc(ctx, yue_builtin_lt));
+    yue_set(ctx, yue_symbol(ctx, "do"), yue_cfunc(ctx, yue_builtin_dolist));
+    yue_set(ctx, yue_symbol(ctx, "while"), yue_cfunc(ctx, yue_builtin_while));
+    yue_set(ctx, yue_symbol(ctx, "if"), yue_cfunc(ctx, yue_builtin_if));
+    yue_restoregc(ctx, gc);
 }
 
 

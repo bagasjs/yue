@@ -1,8 +1,8 @@
-NDEBUG ?= n
-
 CC := clang
 CFLAGS := -Wall -Wextra -pedantic -D_CRT_SECURE_NO_WARNINGS
+LFLAGS := 
 
+NDEBUG ?= n
 ifeq ($(NDEBUG),y)
 	CFLAGS += -O2
 else
@@ -10,4 +10,4 @@ else
 endif
 
 yue.exe: main.c 
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) -o $@ $^ $(LFLAGS)

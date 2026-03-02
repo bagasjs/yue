@@ -143,18 +143,10 @@ int main(int argc, char *argv[])
 
     static char buf[8 * 1024];
     yue_Context *ctx = yue_open(buf, sizeof(buf));
-    size_t gc = yue_savegc(ctx);
-    yue_set(ctx, yue_symbol(ctx, "print"), yue_cfunc(ctx, yue_builtin_print));
-    yue_set(ctx, yue_symbol(ctx, "+"), yue_cfunc(ctx, yue_builtin_add));
-    yue_set(ctx, yue_symbol(ctx, "="), yue_cfunc(ctx, yue_builtin_assign));
-    yue_set(ctx, yue_symbol(ctx, "not"), yue_cfunc(ctx, yue_builtin_not));
-    yue_set(ctx, yue_symbol(ctx, "exit"), yue_cfunc(ctx, yue_builtin_exit));
-    yue_set(ctx, yue_symbol(ctx, "<"), yue_cfunc(ctx, yue_builtin_lt));
-    yue_set(ctx, yue_symbol(ctx, "do"), yue_cfunc(ctx, yue_builtin_dolist));
-    yue_set(ctx, yue_symbol(ctx, "while"), yue_cfunc(ctx, yue_builtin_while));
-    yue_set(ctx, yue_symbol(ctx, "if"), yue_cfunc(ctx, yue_builtin_if));
-    yue_set(ctx, yue_symbol(ctx, "fn"), yue_cfunc(ctx, yue_builtin_fn));
+    yue_load_builtins(ctx);
 
+    size_t gc = yue_savegc(ctx);
+    yue_set(ctx, yue_symbol(ctx, "fn"), yue_cfunc(ctx, yue_builtin_fn));
     yue_set(ctx, yue_symbol(ctx, "openfile"), yue_cfunc(ctx, yue_builtin_openfile));
     yue_set(ctx, yue_symbol(ctx, "closefile"), yue_cfunc(ctx, yue_builtin_closefile));
     yue_restoregc(ctx, gc);
