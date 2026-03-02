@@ -122,7 +122,6 @@ struct yue_Context {
 
     yue_Object *nil;
 
-    yue_Object *call_stack;
     yue_Object *free_list;
     yue_Object *sym_list;
     yue_Object *objects;
@@ -361,19 +360,6 @@ yue_Object *yue_symbol(yue_Context *ctx, const char *name)
 {
     size_t name_len = strlen(name);
     if(name_len + 1 > YUE_STRING_DATA_SIZE) yue_error(ctx, "symbol name is too long\n");
-
-    yue_Object *call = ctx->call_stack;
-    while(call) {
-        yue_Object *list = call->as_func.params;
-        while(!yue_isnil(list)) {
-            yue_Object *head = list->as_pair.head;
-            if(strcmp(head->as_symbol.name, name) == 0) {
-                yue_pushgc(ctx, head);
-                return head;
-            }
-            list = list->as_pair.tail;
-        }
-    }
 
     yue_Object *obj = ctx->sym_list;
     while(obj) {
