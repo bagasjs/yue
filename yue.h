@@ -229,7 +229,11 @@ yue_Object *yue_eval(yue_Context *ctx, yue_Object *obj)
                 case YUE_OBJECT_CFUNC:
                     return fn->as_cfunc(ctx, arg);
                 default:
-                    yue_error(ctx, "Invoking non callable object %s", _yue_type_names[fn->type]);
+                    if(base->type == YUE_OBJECT_SYMBOL) {
+                        yue_error(ctx, "Invoking non callable object `%s` %s", base->as_symbol.name, _yue_type_names[fn->type]);
+                    } else {
+                        yue_error(ctx, "Invoking non callable object %s", _yue_type_names[fn->type]);
+                    }
                     return obj;
                 }
             } break;
@@ -254,6 +258,8 @@ static void mark(yue_Context *ctx, yue_Object *obj)
     } else if(obj->type == YUE_OBJECT_FUNC) {
         mark(ctx, obj->as_func.params);
         mark(ctx, obj->as_func.body);
+    } else if(obj->type == YUE_OBJECT_SYMBOL) {
+        mark(ctx, obj->as_symbol.value);
     }
 }
 
@@ -266,7 +272,6 @@ static void mark_all(yue_Context *ctx)
         yue_Object *obj = ctx->scope[i];
         while(obj) {
             mark(ctx, obj);
-            mark(ctx, obj->as_symbol.value);
             obj = obj->next;
         }
     }
@@ -311,7 +316,8 @@ static void yue_pushgc(yue_Context *ctx, yue_Object *obj)
 
 void yue_set(yue_Context *ctx, yue_Object *sym, yue_Object *value)
 {
-    if(sym->type != YUE_OBJECT_SYMBOL) yue_error(ctx, "set require the first argument to be symbol\n");
+    if(sym->type != YUE_OBJECT_SYMBOL) 
+        yue_error(ctx, "set require the first argument to be symbol but found %s\n", _yue_type_names[sym->type]);
     for(int i = (int)ctx->scope_size - 1; i >= 0; --i) {
         yue_Object *obj = ctx->scope[i];
         while(obj) {
@@ -415,6 +421,7 @@ yue_Object *yue_symbol(yue_Context *ctx, const char *name)
 
     yue_Object *obj = new_object(ctx, YUE_OBJECT_SYMBOL);
     memcpy(obj->as_symbol.name, name, name_len);
+    obj->as_symbol.name[name_len] = 0;
     obj->as_symbol.value = yue_nil(ctx);
     return obj;
 }
@@ -733,21 +740,34 @@ static yue_Object *yue_read(yue_Context *ctx, yue_File *source)
         return yue_number(ctx, val);
     } else if(*source->ptr == '(') {
         source->ptr++;
+        while(_isspace(*source->ptr)) source->ptr++;
+        if(source->ptr < source->eof && *source->ptr == ')') {
+            source->ptr++; // empty list
+            return yue_nil(ctx);
+        }
+
         yue_Object *r =  yue_read(ctx, source);
         yue_Object *root = yue_pair(ctx, r, yue_nil(ctx));
         yue_Object *prev = root;
-        while(*source->ptr != ')') {
+        for(;;) {
+            while(source->ptr < source->eof && _isspace(*source->ptr)) source->ptr++;
+            if(source->ptr >= source->eof) yue_error(ctx, "Unclosed '('");
+            if(*source->ptr == ')') {
+                source->ptr++;
+                break;
+            }
             yue_Object *r = yue_read(ctx, source);
             yue_Object *curr = yue_pair(ctx, r, yue_nil(ctx));
             prev->as_pair.tail = curr;
             prev = curr;
         }
-        source->ptr++;
         return root;
     } else {
         size_t i = 0;
         char name[YUE_STRING_DATA_SIZE] = {0};
-        while(!_isspace(*source->ptr)) {
+        memset(name, 0, YUE_STRING_DATA_SIZE);
+        while(source->ptr < source->eof) {
+            if(_isspace(*source->ptr)) break;
             if(*source->ptr == '(' || *source->ptr == ')') break;
             if(i + 1 >= YUE_STRING_DATA_SIZE) yue_error(ctx, "symbol name is too long");
             name[i] = *source->ptr;
