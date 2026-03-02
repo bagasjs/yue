@@ -1,3 +1,10 @@
-(= greet (fn (a) (print "Hello," a)))
+(= i 0)
+(= greet (fn (name) (do
+    (= x i)
+    (= i (+ i 1))
+    (print i " Hello " name)
+)))
+
 (greet "bagasjs")
-(print a)
+(greet "foo")
+(greet "bar")

@@ -267,6 +267,7 @@ static void mark_all(yue_Context *ctx)
         while(obj) {
             mark(ctx, obj);
             mark(ctx, obj->as_symbol.value);
+            obj = obj->next;
         }
     }
 }
