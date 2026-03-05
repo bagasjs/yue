@@ -3,3 +3,8 @@ yue.pdb
 yue.rdi
 yue.ilk
 test.yue
+
+raylib.yuedll
+raylib.exp
+raylib.lib
+raylib.pdb

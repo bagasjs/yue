@@ -10,7 +10,23 @@
 #endif
 
 #ifndef YUE_MAX_SCOPE_DEPTH
-#define YUE_MAX_SCOPE_DEPTH 64
+#define YUE_MAX_SCOPE_DEPTH 32
+#endif
+
+#ifndef YUE_API
+    #ifdef _WIN32
+        #ifdef YUE_BUILD_DLL
+            #define YUE_API __declspec(dllexport)
+        #else
+            #define YUE_API __declspec(dllimport)
+        #endif
+    #else
+        #define YUE_API
+    #endif
+#endif
+
+#ifndef YUE_DEF
+#define YUE_DEF 
 #endif
 
 typedef struct yue_Context yue_Context; 
@@ -41,48 +57,48 @@ typedef struct yue_File {
 } yue_File;
 
 // recommended bufsz is 64KB
-yue_Context *yue_open(void *buf, size_t bufsz);
-yue_Object *yue_eval(yue_Context *ctx, yue_Object *obj);
-yue_Object *yue_get(yue_Context *ctx, yue_Object *sym);
-void yue_set(yue_Context *ctx, yue_Object *sym, yue_Object *value);
+YUE_DEF yue_Context *yue_open(void *buf, size_t bufsz);
+YUE_DEF yue_Object *yue_eval(yue_Context *ctx, yue_Object *obj);
+YUE_DEF yue_Object *yue_get(yue_Context *ctx, yue_Object *sym);
+YUE_DEF void yue_set(yue_Context *ctx, yue_Object *sym, yue_Object *value);
 
 // Executing file
 
 // This will read a single top object and modify the file
-yue_Object *yue_read(yue_Context *ctx, yue_File *file);
+YUE_DEF yue_Object *yue_read(yue_Context *ctx, yue_File *file);
 
 // Object accessor
-bool yue_isnil(yue_Object *obj);
-yue_Number yue_tonumber(yue_Context *ctx, yue_Object *obj);
-void *yue_touserdata(yue_Context *ctx, yue_Object *obj);
-size_t yue_getstringlen(yue_Context *ctx, yue_Object *obj);
-char *yue_tostring(yue_Context *ctx, yue_Object *obj, char *dst, size_t dstsz);
+YUE_DEF bool yue_isnil(yue_Object *obj);
+YUE_DEF yue_Number yue_tonumber(yue_Context *ctx, yue_Object *obj);
+YUE_DEF void *yue_touserdata(yue_Context *ctx, yue_Object *obj);
+YUE_DEF size_t yue_getstringlen(yue_Context *ctx, yue_Object *obj);
+YUE_DEF char *yue_tostring(yue_Context *ctx, yue_Object *obj, char *dst, size_t dstsz);
 
 // Object constructor
-yue_Object *yue_nil(yue_Context *ctx);
-yue_Object *yue_number(yue_Context *ctx, yue_Number number);
-yue_Object *yue_pair(yue_Context *ctx, yue_Object *head, yue_Object *tail);
-yue_Object *yue_list(yue_Context *ctx, yue_Object **objs, size_t count);
-yue_Object *yue_string_sized(yue_Context *ctx, const char *cstr, size_t n);
-yue_Object *yue_string(yue_Context *ctx, const char *cstr);
-yue_Object *yue_symbol(yue_Context *ctx, const char *name);
-yue_Object *yue_userdata(yue_Context *ctx, void *userdata);
-yue_Object *yue_func(yue_Context *ctx, yue_Object *params, yue_Object *body);
+YUE_DEF yue_Object *yue_nil(yue_Context *ctx);
+YUE_DEF yue_Object *yue_number(yue_Context *ctx, yue_Number number);
+YUE_DEF yue_Object *yue_pair(yue_Context *ctx, yue_Object *head, yue_Object *tail);
+YUE_DEF yue_Object *yue_list(yue_Context *ctx, yue_Object **objs, size_t count);
+YUE_DEF yue_Object *yue_string_sized(yue_Context *ctx, const char *cstr, size_t n);
+YUE_DEF yue_Object *yue_string(yue_Context *ctx, const char *cstr);
+YUE_DEF yue_Object *yue_symbol(yue_Context *ctx, const char *name);
+YUE_DEF yue_Object *yue_userdata(yue_Context *ctx, void *userdata);
+YUE_DEF yue_Object *yue_func(yue_Context *ctx, yue_Object *params, yue_Object *body);
 
-yue_Object *yue_nextarg(yue_Context *ctx, yue_Object **p_arg);
-yue_Object *yue_cfunc(yue_Context *ctx, yue_CFunc cfunc);
+YUE_DEF yue_Object *yue_nextarg(yue_Context *ctx, yue_Object **p_arg);
+YUE_DEF yue_Object *yue_cfunc(yue_Context *ctx, yue_CFunc cfunc);
 
 // Builtin functions
-yue_Object *yue_builtin_while(yue_Context *ctx, yue_Object *arg);
-yue_Object *yue_builtin_if(yue_Context *ctx, yue_Object *arg);
-yue_Object *yue_builtin_lt(yue_Context *ctx, yue_Object *arg);
-yue_Object *yue_builtin_print(yue_Context *ctx, yue_Object *arg);
-yue_Object *yue_builtin_add(yue_Context *ctx, yue_Object *arg);
-yue_Object *yue_builtin_dolist(yue_Context *ctx, yue_Object *arg);
-yue_Object *yue_builtin_assign(yue_Context *ctx, yue_Object *arg);
-yue_Object *yue_builtin_not(yue_Context *ctx, yue_Object *arg);
-yue_Object *yue_builtin_exit(yue_Context *ctx, yue_Object *arg);
-void yue_load_builtins(yue_Context *ctx);
+YUE_DEF yue_Object *yue_builtin_while(yue_Context *ctx, yue_Object *arg);
+YUE_DEF yue_Object *yue_builtin_if(yue_Context *ctx, yue_Object *arg);
+YUE_DEF yue_Object *yue_builtin_lt(yue_Context *ctx, yue_Object *arg);
+YUE_DEF yue_Object *yue_builtin_print(yue_Context *ctx, yue_Object *arg);
+YUE_DEF yue_Object *yue_builtin_add(yue_Context *ctx, yue_Object *arg);
+YUE_DEF yue_Object *yue_builtin_dolist(yue_Context *ctx, yue_Object *arg);
+YUE_DEF yue_Object *yue_builtin_assign(yue_Context *ctx, yue_Object *arg);
+YUE_DEF yue_Object *yue_builtin_not(yue_Context *ctx, yue_Object *arg);
+YUE_DEF yue_Object *yue_builtin_exit(yue_Context *ctx, yue_Object *arg);
+YUE_DEF void yue_load_builtins(yue_Context *ctx);
 
 #endif // YUE_H_
 
@@ -747,10 +763,17 @@ yue_Object *yue_builtin_exit(yue_Context *ctx, yue_Object *arg)
     return yue_nil(ctx);
 }
 
+yue_Object *yue_builtin_fn(yue_Context *ctx, yue_Object *arg)
+{
+    yue_Object *params = yue_nextarg(ctx, &arg);
+    yue_Object *body   = yue_nextarg(ctx, &arg);
+    return yue_func(ctx, params, body);
+}
+
 static inline bool _isdigit(int c) { return '0' <= c && c <= '9'; }
 static inline bool _isspace(int c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
 
-static yue_Object *yue_read(yue_Context *ctx, yue_File *source)
+yue_Object *yue_read(yue_Context *ctx, yue_File *source)
 {
     while(_isspace(*source->ptr)) source->ptr++;
     if(source->ptr >= source->eof) return yue_nil(ctx);
@@ -828,6 +851,7 @@ void yue_load_builtins(yue_Context *ctx)
     yue_set(ctx, yue_symbol(ctx, "do"), yue_cfunc(ctx, yue_builtin_dolist));
     yue_set(ctx, yue_symbol(ctx, "while"), yue_cfunc(ctx, yue_builtin_while));
     yue_set(ctx, yue_symbol(ctx, "if"), yue_cfunc(ctx, yue_builtin_if));
+    yue_set(ctx, yue_symbol(ctx, "fn"), yue_cfunc(ctx, yue_builtin_fn));
     yue_restoregc(ctx, gc);
 }
 

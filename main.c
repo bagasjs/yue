@@ -93,6 +93,11 @@ bool read_entire_file(const char *filepath, yue_File *file)
     }
     return true;
 }
+yue_Object *yue_builtin_list(yue_Context *ctx, yue_Object *arg)
+{
+    yue_Object *list = yue_eval_list(ctx, arg);
+    return list;
+}
 
 #include <stdlib.h>
 yue_Object *yue_builtin_openfile(yue_Context *ctx, yue_Object *arg)
@@ -120,13 +125,6 @@ yue_Object *yue_builtin_closefile(yue_Context *ctx, yue_Object *arg)
     return yue_nil(ctx);
 }
 
-yue_Object *yue_builtin_fn(yue_Context *ctx, yue_Object *arg)
-{
-    yue_Object *params = yue_nextarg(ctx, &arg);
-    yue_Object *body   = yue_nextarg(ctx, &arg);
-    return yue_func(ctx, params, body);
-}
-
 void dump_ctx(yue_Context *ctx)
 {
     printf("Variables:\n");
@@ -138,6 +136,35 @@ void dump_ctx(yue_Context *ctx)
             obj = obj->next;
         }
     }
+}
+
+#ifdef _WIN32
+#include <windows.h>
+typedef HMODULE yue_DLL;
+#else
+typedef void *yue_DLL;
+#endif
+
+#define DLL_CAP 32
+static yue_DLL dlls[DLL_CAP] = {0};
+static size_t dlls_count = 0;
+
+typedef void (*yue_RequireDLLLoader)(yue_Context *ctx);
+yue_Object *yue_builtin_require_dll(yue_Context *ctx, yue_Object *arg)
+{
+    char buf[256] = {0};
+    const char *filepath = yue_tostring(ctx, yue_eval(ctx, yue_nextarg(ctx, &arg)), buf, sizeof(buf));
+#ifdef _WIN32
+    if(dlls_count > DLL_CAP) yue_error(ctx, "Could not load more dll. This happened during loading %s\n", filepath);
+    yue_DLL dll = LoadLibrary(filepath);
+    if(dll == NULL) yue_error(ctx, "Failed to load %s\n", filepath);
+    yue_RequireDLLLoader proc = (yue_RequireDLLLoader)GetProcAddress(dll, "yue_require_dll");
+    if(proc == NULL) yue_error(ctx, "Failed to load yue_require_dll from %s\n", filepath);
+    proc(ctx);
+    dlls[dlls_count++] = dll;
+#else
+#endif
+    return yue_nil(ctx);
 }
 
 int main(int argc, char *argv[])
@@ -159,9 +186,10 @@ int main(int argc, char *argv[])
     yue_load_builtins(ctx);
 
     size_t gc = yue_savegc(ctx);
-    yue_set(ctx, yue_symbol(ctx, "fn"), yue_cfunc(ctx, yue_builtin_fn));
+    yue_set(ctx, yue_symbol(ctx, "list"), yue_cfunc(ctx, yue_builtin_list));
     yue_set(ctx, yue_symbol(ctx, "openfile"), yue_cfunc(ctx, yue_builtin_openfile));
     yue_set(ctx, yue_symbol(ctx, "closefile"), yue_cfunc(ctx, yue_builtin_closefile));
+    yue_set(ctx, yue_symbol(ctx, "require-dll"), yue_cfunc(ctx, yue_builtin_require_dll));
     yue_restoregc(ctx, gc);
 
     yue_File copy = source;
@@ -170,6 +198,14 @@ int main(int argc, char *argv[])
         yue_Object *obj = yue_read(ctx, &copy);
         if(yue_isnil(obj)) break;
         yue_eval(ctx, obj);
+    }
+
+    for(int i = 0; i < dlls_count; ++i) {
+        yue_DLL dll = dlls[i];
+#ifdef _WIN32
+        FreeLibrary(dll);
+#else
+#endif
     }
 
     free((void*)source.ptr);
