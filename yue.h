@@ -189,6 +189,38 @@ yue_Context *yue_open(void *buf, size_t bufsz)
     return ctx;
 }
 
+static void dump_obj(yue_Object *obj, int level);
+yue_Object *yue_eval_list(yue_Context *ctx, yue_Object *obj)
+{
+    switch(obj->type) {
+    case YUE_OBJECT_PAIR:
+        {
+            yue_Object *base = obj;
+            while(!yue_isnil(obj)) {
+                obj->as_pair.head = yue_eval(ctx, obj->as_pair.head);
+                obj = obj->as_pair.tail;
+            }
+            return base;
+        } break;
+    default:
+        return yue_eval(ctx, obj);
+    }
+}
+
+static void begin_scope(yue_Context *ctx)
+{
+    if(ctx->scope_size > YUE_MAX_SCOPE_DEPTH) yue_error(ctx, "Max scope depth exceeded");
+    ctx->scope[ctx->scope_size] = NULL;
+    ctx->scope_size += 1;
+}
+
+static void end_scope(yue_Context *ctx)
+{
+    if(((int)ctx->scope_size - 1) < 0) yue_error(ctx, "Min scope depth reached");
+    ctx->scope_size -= 1;
+    ctx->scope[ctx->scope_size] = NULL;
+}
+
 yue_Object *yue_eval(yue_Context *ctx, yue_Object *obj)
 {
     switch(obj->type) {
@@ -209,10 +241,13 @@ yue_Object *yue_eval(yue_Context *ctx, yue_Object *obj)
                 switch(fn->type) {
                 case YUE_OBJECT_FUNC:
                     {
-                        ctx->scope_size += 1;
+                        // evaluate all args first
+                        arg = yue_eval_list(ctx, arg);
+                        
                         yue_Object *symbols = fn->as_func.params;
-                        // load params
+                        // load arguments
                         yue_Object *a = NULL;
+                        begin_scope(ctx);
                         while(true) {
                             if(yue_isnil((a = yue_nextarg(ctx, &arg)))) break;
                             if(yue_isnil(symbols)) break;
@@ -223,7 +258,7 @@ yue_Object *yue_eval(yue_Context *ctx, yue_Object *obj)
                             yue_set(ctx, symbol, yue_eval(ctx, a));
                         }
                         yue_Object *obj = yue_eval(ctx, fn->as_func.body);
-                        ctx->scope_size -= 1;
+                        end_scope(ctx);
                         return obj;
                     }
                 case YUE_OBJECT_CFUNC:
