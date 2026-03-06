@@ -677,6 +677,16 @@ yue_Object *yue_builtin_add(yue_Context *ctx, yue_Object *arg)
     return yue_number(ctx, result);
 }
 
+yue_Object *yue_builtin_sub(yue_Context *ctx, yue_Object *arg)
+{
+    yue_Number result = yue_tonumber(ctx, yue_eval(ctx, yue_nextarg(ctx, &arg)));
+    yue_Object *a = NULL;
+    while(!yue_isnil((a = yue_nextarg(ctx, &arg)))) {
+        result -= yue_tonumber(ctx, yue_eval(ctx, a));
+    }
+    return yue_number(ctx, result);
+}
+
 yue_Object *yue_builtin_dolist(yue_Context *ctx, yue_Object *arg) 
 {
     yue_Object *a = NULL;
@@ -844,6 +854,7 @@ void yue_load_builtins(yue_Context *ctx)
     size_t gc = yue_savegc(ctx);
     yue_set(ctx, yue_symbol(ctx, "print"), yue_cfunc(ctx, yue_builtin_print));
     yue_set(ctx, yue_symbol(ctx, "+"), yue_cfunc(ctx, yue_builtin_add));
+    yue_set(ctx, yue_symbol(ctx, "-"), yue_cfunc(ctx, yue_builtin_sub));
     yue_set(ctx, yue_symbol(ctx, "="), yue_cfunc(ctx, yue_builtin_assign));
     yue_set(ctx, yue_symbol(ctx, "not"), yue_cfunc(ctx, yue_builtin_not));
     yue_set(ctx, yue_symbol(ctx, "exit"), yue_cfunc(ctx, yue_builtin_exit));

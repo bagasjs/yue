@@ -99,32 +99,6 @@ yue_Object *yue_builtin_list(yue_Context *ctx, yue_Object *arg)
     return list;
 }
 
-#include <stdlib.h>
-yue_Object *yue_builtin_openfile(yue_Context *ctx, yue_Object *arg)
-{
-    size_t gc = yue_savegc(ctx);
-    char buf[256] = {0};
-    yue_Object *x = yue_eval(ctx, yue_nextarg(ctx, &arg));
-    const char *filename = yue_tostring(ctx, x, buf, sizeof(buf));
-    printf("'%s' '%s'\n", filename, buf);
-    yue_File *file = malloc(sizeof(*file));
-    if(!read_entire_file(filename, file)) {
-        yue_restoregc(ctx, gc);
-        return yue_nil(ctx);
-    }
-    yue_restoregc(ctx, gc);
-    return yue_userdata(ctx, file);
-}
-
-yue_Object *yue_builtin_closefile(yue_Context *ctx, yue_Object *arg)
-{
-    size_t gc = yue_savegc(ctx);
-    yue_File *file = yue_touserdata(ctx, yue_eval(ctx, yue_nextarg(ctx, &arg)));
-    free((void*)file->fst);
-    yue_restoregc(ctx, gc);
-    return yue_nil(ctx);
-}
-
 void dump_ctx(yue_Context *ctx)
 {
     printf("Variables:\n");
@@ -181,14 +155,12 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    static char buf[8 * 1024];
+    static char buf[64 * 1024];
     yue_Context *ctx = yue_open(buf, sizeof(buf));
     yue_load_builtins(ctx);
 
     size_t gc = yue_savegc(ctx);
     yue_set(ctx, yue_symbol(ctx, "list"), yue_cfunc(ctx, yue_builtin_list));
-    yue_set(ctx, yue_symbol(ctx, "openfile"), yue_cfunc(ctx, yue_builtin_openfile));
-    yue_set(ctx, yue_symbol(ctx, "closefile"), yue_cfunc(ctx, yue_builtin_closefile));
     yue_set(ctx, yue_symbol(ctx, "require-dll"), yue_cfunc(ctx, yue_builtin_require_dll));
     yue_restoregc(ctx, gc);
 
