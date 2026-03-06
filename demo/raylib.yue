@@ -1,0 +1,55 @@
+(require-dll "./raylib.yuedll")
+
+(init-window 800 600 "Hello, World")
+
+(= KEY_W 87)
+(= KEY_A 65)
+(= KEY_S 83)
+(= KEY_D 68)
+
+(= SPEED 100)
+(= player.x 100)
+(= player.y 100)
+
+(while (not (window-should-close)) (do
+    (if (is-key-down KEY_W) (do
+        (= player.y (- player.y (* (get-frame-time) SPEED)))
+        (print "[W] player.y =" player.y)
+    ))
+    (if (is-key-down KEY_S) (do
+        (= player.y (+ player.y (* (get-frame-time) SPEED)))
+        (print "[S] player.y =" player.y)
+    ))
+    (if (is-key-down KEY_A) (do
+        (= player.x (- player.x (* (get-frame-time) SPEED)))
+        (print "[A] player.x =" player.x)
+    ))
+    (if (is-key-down KEY_D) (do
+        (= player.x (+ player.x (* (get-frame-time) SPEED)))
+        (print "[D] player.x =" player.x)
+    ))
+    (if (is-key-down KEY_UP) (do
+        (= player.y (- player.y (* (get-frame-time) SPEED)))
+        (print "[W] player.y =" player.y)
+    ))
+    (if (is-key-down KEY_DOWN) (do
+        (= player.y (+ player.y (* (get-frame-time) SPEED)))
+        (print "[S] player.y =" player.y)
+    ))
+    (if (is-key-down KEY_LEFT) (do
+        (= player.x (- player.x (* (get-frame-time) SPEED)))
+        (print "[A] player.x =" player.x)
+    ))
+    (if (is-key-down KEY_RIGHT) (do
+        (= player.x (+ player.x (* (get-frame-time) SPEED)))
+        (print "[D] player.x =" player.x)
+    ))
+
+    (clear-background 255 255 255 255)
+    (draw-rectangle player.x player.y 100 100 255 0 0 255)
+    (begin-drawing)
+    (end-drawing)
+))
+
+(close-window)
+
