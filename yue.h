@@ -212,7 +212,7 @@ yue_Context *yue_open(void *buf, size_t bufsz)
 }
 
 static void dump_obj(yue_Object *obj, int level);
-yue_Object *yue_eval_list(yue_Context *ctx, yue_Object *obj)
+static yue_Object *_eval_list(yue_Context *ctx, yue_Object *obj)
 {
     switch(obj->type) {
     case YUE_OBJECT_PAIR:
@@ -264,7 +264,7 @@ yue_Object *yue_eval(yue_Context *ctx, yue_Object *obj)
                 case YUE_OBJECT_FUNC:
                     {
                         // evaluate all args first
-                        arg = yue_eval_list(ctx, arg);
+                        arg = _eval_list(ctx, arg);
                         
                         yue_Object *symbols = fn->as_func.params;
                         // load arguments
@@ -346,16 +346,6 @@ static void sweep(yue_Context *ctx)
             ctx->free_list = obj;
         }
     }
-}
-
-static void ctx_status(yue_Context *ctx)
-{
-    yue_Object *o = ctx->free_list;
-    size_t n = 0;
-    while(o) { n++; o = o->next; }
-    YUE_TRACEF("TOTAL OBJECTS : %zu\n", ctx->count_objects);
-    YUE_TRACEF("SP            : %zu\n", ctx->stack_size);
-    YUE_TRACEF("FREE OBJECTS  : %zu\n", n);
 }
 
 void yue_rungc(yue_Context *ctx)
@@ -490,6 +480,7 @@ yue_Object *yue_symbol(yue_Context *ctx, const char *name)
     memcpy(obj->as_symbol.name, name, name_len);
     obj->as_symbol.name[name_len] = 0;
     obj->as_symbol.value = yue_nil(ctx);
+    yue_pushgc(ctx, obj);
     return obj;
 }
 
@@ -725,13 +716,13 @@ yue_Object *yue_builtin_dolist(yue_Context *ctx, yue_Object *arg)
 {
     size_t gc = yue_savegc(ctx);
     yue_Object *a = NULL;
+    size_t eval_gc = yue_savegc(ctx);
     while(!yue_isnil((a = yue_nextarg(ctx, &arg)))) {
-        size_t gc = yue_savegc(ctx);
-        a = yue_eval(ctx, a);
         yue_restoregc(ctx, gc);
+        a = yue_eval(ctx, a);
     }
     yue_restoregc(ctx, gc);
-    yue_pushgc(ctx, arg);
+    yue_pushgc(ctx, a);
     return a;
 }
 
@@ -852,6 +843,7 @@ yue_Object *yue_read(yue_Context *ctx, yue_File *source)
             return yue_nil(ctx);
         }
 
+        size_t gc = yue_savegc(ctx);
         yue_Object *r =  yue_read(ctx, source);
         yue_Object *root = yue_pair(ctx, r, yue_nil(ctx));
         yue_Object *prev = root;
@@ -867,6 +859,8 @@ yue_Object *yue_read(yue_Context *ctx, yue_File *source)
             prev->as_pair.tail = curr;
             prev = curr;
         }
+        yue_restoregc(ctx, gc);
+        yue_pushgc(ctx, root);
         return root;
     } else {
         size_t i = 0;

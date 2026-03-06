@@ -93,11 +93,6 @@ bool read_entire_file(const char *filepath, yue_File *file)
     }
     return true;
 }
-yue_Object *yue_builtin_list(yue_Context *ctx, yue_Object *arg)
-{
-    yue_Object *list = yue_eval_list(ctx, arg);
-    return list;
-}
 
 void dump_ctx(yue_Context *ctx)
 {
@@ -160,7 +155,6 @@ int main(int argc, char *argv[])
     yue_load_builtins(ctx);
 
     size_t gc = yue_savegc(ctx);
-    yue_set(ctx, yue_symbol(ctx, "list"), yue_cfunc(ctx, yue_builtin_list));
     yue_set(ctx, yue_symbol(ctx, "require-dll"), yue_cfunc(ctx, yue_builtin_require_dll));
     yue_restoregc(ctx, gc);
 
