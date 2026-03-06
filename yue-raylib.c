@@ -95,7 +95,7 @@ static yue_Object *f_is_key_down(yue_Context *ctx, yue_Object *arg)
     yue_eval_list(ctx, arg);
     yue_Number keycode = yue_tonumber(ctx, yue_nextarg(ctx, &arg));
     yue_restoregc(ctx, gc);
-    return IsKeyPressed(keycode) ? yue_number(ctx, 1) : yue_nil(ctx);
+    return IsKeyDown(keycode) ? yue_number(ctx, 1) : yue_nil(ctx);
 }
 
 static yue_Object *f_is_key_up(yue_Context *ctx, yue_Object *arg)
@@ -116,6 +116,12 @@ static yue_Object *f_is_key_released(yue_Context *ctx, yue_Object *arg)
     return IsKeyReleased(keycode) ? yue_number(ctx, 1) : yue_nil(ctx);
 }
 
+static yue_Object *f_get_frame_time(yue_Context *ctx, yue_Object *arg)
+{
+    return yue_number(ctx, GetFrameTime());
+}
+
+
 YUE_API void yue_require_dll(yue_Context *ctx)
 {
     yue_set(ctx, yue_symbol(ctx, "init-window"), yue_cfunc(ctx, f_init_window));
@@ -129,4 +135,5 @@ YUE_API void yue_require_dll(yue_Context *ctx)
     yue_set(ctx, yue_symbol(ctx, "is-key-down"), yue_cfunc(ctx, f_is_key_down));
     yue_set(ctx, yue_symbol(ctx, "is-key-up"), yue_cfunc(ctx, f_is_key_up));
     yue_set(ctx, yue_symbol(ctx, "is-key-released"), yue_cfunc(ctx, f_is_key_released));
+    yue_set(ctx, yue_symbol(ctx, "get-frame-time"), yue_cfunc(ctx, f_get_frame_time));
 }

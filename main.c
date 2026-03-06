@@ -155,7 +155,7 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    static char buf[64 * 1024];
+    static char buf[32 * 1024];
     yue_Context *ctx = yue_open(buf, sizeof(buf));
     yue_load_builtins(ctx);
 

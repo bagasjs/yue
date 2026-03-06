@@ -29,6 +29,12 @@
 #define YUE_DEF 
 #endif
 
+/*#define YUE_TRACEF(...)*/
+#ifndef YUE_TRACEF
+#include <stdio.h>
+#define YUE_TRACEF(...) fprintf(stderr, __VA_ARGS__)
+#endif
+
 typedef struct yue_Context yue_Context; 
 typedef struct yue_Object yue_Object;
 typedef yue_Object *(*yue_CFunc)(yue_Context *ctx, yue_Object *arg);
@@ -340,6 +346,16 @@ static void sweep(yue_Context *ctx)
             ctx->free_list = obj;
         }
     }
+}
+
+static void ctx_status(yue_Context *ctx)
+{
+    yue_Object *o = ctx->free_list;
+    size_t n = 0;
+    while(o) { n++; o = o->next; }
+    YUE_TRACEF("TOTAL OBJECTS : %zu\n", ctx->count_objects);
+    YUE_TRACEF("SP            : %zu\n", ctx->stack_size);
+    YUE_TRACEF("FREE OBJECTS  : %zu\n", n);
 }
 
 void yue_rungc(yue_Context *ctx)
@@ -658,51 +674,73 @@ static void print_object_inner(yue_Object *obj, int level)
 
 yue_Object *yue_builtin_print(yue_Context *ctx, yue_Object *arg)
 {
+    size_t gc = yue_savegc(ctx);
     yue_Object *a = NULL;
     while(!yue_isnil((a = yue_nextarg(ctx, &arg)))) {
         print_object_inner(yue_eval(ctx, a), 0);
         printf(" ");
     }
     printf("\n");
+    yue_restoregc(ctx, gc);
     return yue_nil(ctx);
 }
 
 yue_Object *yue_builtin_add(yue_Context *ctx, yue_Object *arg)
 {
+    size_t gc = yue_savegc(ctx);
     yue_Number result = 0;
     yue_Object *a = NULL;
     while(!yue_isnil((a = yue_nextarg(ctx, &arg)))) {
         result += yue_tonumber(ctx, yue_eval(ctx, a));
     }
+    yue_restoregc(ctx, gc);
     return yue_number(ctx, result);
 }
 
 yue_Object *yue_builtin_sub(yue_Context *ctx, yue_Object *arg)
 {
+    size_t gc = yue_savegc(ctx);
     yue_Number result = yue_tonumber(ctx, yue_eval(ctx, yue_nextarg(ctx, &arg)));
     yue_Object *a = NULL;
     while(!yue_isnil((a = yue_nextarg(ctx, &arg)))) {
         result -= yue_tonumber(ctx, yue_eval(ctx, a));
     }
+    yue_restoregc(ctx, gc);
+    return yue_number(ctx, result);
+}
+
+yue_Object *yue_builtin_mul(yue_Context *ctx, yue_Object *arg)
+{
+    size_t gc = yue_savegc(ctx);
+    yue_Number result = yue_tonumber(ctx, yue_eval(ctx, yue_nextarg(ctx, &arg)));
+    yue_Object *a = NULL;
+    while(!yue_isnil((a = yue_nextarg(ctx, &arg)))) {
+        result *= yue_tonumber(ctx, yue_eval(ctx, a));
+    }
+    yue_restoregc(ctx, gc);
     return yue_number(ctx, result);
 }
 
 yue_Object *yue_builtin_dolist(yue_Context *ctx, yue_Object *arg) 
 {
+    size_t gc = yue_savegc(ctx);
     yue_Object *a = NULL;
     while(!yue_isnil((a = yue_nextarg(ctx, &arg)))) {
         size_t gc = yue_savegc(ctx);
         a = yue_eval(ctx, a);
         yue_restoregc(ctx, gc);
     }
+    yue_restoregc(ctx, gc);
     yue_pushgc(ctx, arg);
     return a;
 }
 
 yue_Object *yue_builtin_assign(yue_Context *ctx, yue_Object *arg) 
 {
+    size_t gc = yue_savegc(ctx);
     yue_Object *symbol = yue_nextarg(ctx, &arg);
     yue_Object *value  = yue_eval(ctx, yue_nextarg(ctx, &arg));
+    yue_restoregc(ctx, gc);
     yue_set(ctx, symbol, value);
     return yue_nil(ctx);
 }
@@ -725,10 +763,10 @@ yue_Object *yue_builtin_while(yue_Context *ctx, yue_Object *arg)
 
 yue_Object *yue_builtin_if(yue_Context *ctx, yue_Object *arg)
 {
+    size_t eval_gc = yue_savegc(ctx);
     yue_Object *cond = yue_nextarg(ctx, &arg);
     yue_Object *if_true  = yue_nextarg(ctx, &arg);
     yue_Object *if_false = yue_nextarg(ctx, &arg);
-    size_t eval_gc = yue_savegc(ctx);
     if(!yue_isnil(yue_eval(ctx, cond))) {
         yue_eval(ctx, if_true);
     } else {
@@ -855,6 +893,7 @@ void yue_load_builtins(yue_Context *ctx)
     yue_set(ctx, yue_symbol(ctx, "print"), yue_cfunc(ctx, yue_builtin_print));
     yue_set(ctx, yue_symbol(ctx, "+"), yue_cfunc(ctx, yue_builtin_add));
     yue_set(ctx, yue_symbol(ctx, "-"), yue_cfunc(ctx, yue_builtin_sub));
+    yue_set(ctx, yue_symbol(ctx, "*"), yue_cfunc(ctx, yue_builtin_mul));
     yue_set(ctx, yue_symbol(ctx, "="), yue_cfunc(ctx, yue_builtin_assign));
     yue_set(ctx, yue_symbol(ctx, "not"), yue_cfunc(ctx, yue_builtin_not));
     yue_set(ctx, yue_symbol(ctx, "exit"), yue_cfunc(ctx, yue_builtin_exit));
