@@ -111,6 +111,7 @@ void dump_ctx(yue_Context *ctx)
 #include <windows.h>
 typedef HMODULE yue_DLL;
 #else
+#include <dlfcn.h>
 typedef void *yue_DLL;
 #endif
 
@@ -123,8 +124,8 @@ yue_Object *yue_builtin_require_dll(yue_Context *ctx, yue_Object *arg)
 {
     char buf[256] = {0};
     const char *filepath = yue_tostring(ctx, yue_eval(ctx, yue_nextarg(ctx, &arg)), buf, sizeof(buf));
-#ifdef _WIN32
     if(dlls_count > DLL_CAP) yue_error(ctx, "Could not load more dll. This happened during loading %s\n", filepath);
+#ifdef _WIN32
     yue_DLL dll = LoadLibrary(filepath);
     if(dll == NULL) yue_error(ctx, "Failed to load %s\n", filepath);
     yue_RequireDLLLoader proc = (yue_RequireDLLLoader)GetProcAddress(dll, "yue_require_dll");
@@ -132,6 +133,12 @@ yue_Object *yue_builtin_require_dll(yue_Context *ctx, yue_Object *arg)
     proc(ctx);
     dlls[dlls_count++] = dll;
 #else
+    yue_DLL dll = dlopen(filepath, RTLD_NOW);
+    if(dll == NULL) yue_error(ctx, "Failed to load %s\n", filepath);
+    yue_RequireDLLLoader proc = (yue_RequireDLLLoader)dlsym(dll, "yue_require_dll");
+    if(proc == NULL) yue_error(ctx, "Failed to load yue_require_dll from %s\n", filepath);
+    proc(ctx);
+    dlls[dlls_count++] = dll;
 #endif
     return yue_nil(ctx);
 }
@@ -171,6 +178,7 @@ int main(int argc, char *argv[])
 #ifdef _WIN32
         FreeLibrary(dll);
 #else
+        dlclose(dll);
 #endif
     }
 
