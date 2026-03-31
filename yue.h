@@ -50,6 +50,7 @@ typedef enum {
     YUE_OBJECT_FUNC,
     YUE_OBJECT_CFUNC,
     YUE_OBJECT_USERDATA,
+    YUE_OBJECT_RESOURCE,
 } yue_ObjectType;
 
 typedef struct yue_File {
@@ -140,6 +141,10 @@ struct yue_Object {
             yue_Object *params;
             yue_Object *body;
         } as_func;
+        struct {
+            void *data;
+            void (*destroy)(void *data);
+        } as_resource;
         void *as_userdata;
     };
 };
@@ -165,6 +170,7 @@ static const char *_yue_type_names[] = {
     [YUE_OBJECT_USERDATA] = "YUE_OBJECT_USERDATA",
     [YUE_OBJECT_FUNC] = "YUE_OBJECT_FUNC",
     [YUE_OBJECT_CFUNC] = "YUE_OBJECT_CFUNC",
+    [YUE_OBJECT_RESOURCE] = "YUE_OBJECT_RESOURCE",
 };
 
 
@@ -251,6 +257,7 @@ yue_Object *yue_eval(yue_Context *ctx, yue_Object *obj)
         case YUE_OBJECT_CFUNC:
         case YUE_OBJECT_STRING:
         case YUE_OBJECT_USERDATA:
+        case YUE_OBJECT_RESOURCE:
         case YUE_OBJECT_FUNC:
             return obj;
         case YUE_OBJECT_SYMBOL:
@@ -342,6 +349,8 @@ static void sweep(yue_Context *ctx)
         if(obj->marked) {
             obj->marked = false;
         } else {
+            if(obj->type == YUE_OBJECT_RESOURCE)
+                obj->as_resource.destroy(obj->as_resource.data);
             obj->next = ctx->free_list;
             ctx->free_list = obj;
         }
@@ -632,6 +641,9 @@ static void print_object_inner(yue_Object *obj, int level)
             break;
         case YUE_OBJECT_USERDATA:
             printf("<userdata: %p>", obj->as_userdata);
+            break;
+        case YUE_OBJECT_RESOURCE:
+            printf("<resource: %p>", obj->as_userdata);
             break;
         case YUE_OBJECT_NUMBER:
             printf("%f", obj->as_number);
