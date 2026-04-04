@@ -88,6 +88,7 @@ YUE_DEF yue_Object *yue_pair(yue_Context *ctx, yue_Object *head, yue_Object *tai
 YUE_DEF yue_Object *yue_list(yue_Context *ctx, yue_Object **objs, size_t count);
 YUE_DEF yue_Object *yue_string_sized(yue_Context *ctx, const char *cstr, size_t n);
 YUE_DEF yue_Object *yue_string(yue_Context *ctx, const char *cstr);
+YUE_DEF yue_Object *yue_resource(yue_Context *ctx, void *data, void (*destroy)(void *data));
 YUE_DEF yue_Object *yue_symbol(yue_Context *ctx, const char *name);
 YUE_DEF yue_Object *yue_userdata(yue_Context *ctx, void *userdata);
 YUE_DEF yue_Object *yue_func(yue_Context *ctx, yue_Object *params, yue_Object *body);
@@ -493,6 +494,15 @@ yue_Object *yue_symbol(yue_Context *ctx, const char *name)
     return obj;
 }
 
+yue_Object *yue_resource(yue_Context *ctx, void *data, void (*destroy)(void *data))
+{
+    yue_Object *obj = new_object(ctx, YUE_OBJECT_RESOURCE);
+    obj->as_resource.data    = data;
+    obj->as_resource.destroy = destroy;
+    yue_pushgc(ctx, obj);
+    return obj;
+}
+
 yue_Object *yue_string_sized(yue_Context *ctx, const char *cstr, size_t n)
 {
     yue_Object *root = NULL;
@@ -821,6 +831,53 @@ yue_Object *yue_builtin_fn(yue_Context *ctx, yue_Object *arg)
     return yue_func(ctx, params, body);
 }
 
+yue_Object *yue_builtin_list(yue_Context *ctx, yue_Object *arg)
+{
+    size_t gc = yue_savegc(ctx);
+    yue_Object *result = _eval_list(ctx, arg);
+    yue_restoregc(ctx, gc);
+    return result;
+}
+
+yue_Object *yue_builtin_head(yue_Context *ctx, yue_Object *arg)
+{
+    size_t gc = yue_savegc(ctx);
+    yue_Object *list = yue_eval(ctx, yue_nextarg(ctx, &arg));
+    yue_restoregc(ctx, gc);
+    if(list->type != YUE_OBJECT_PAIR) yue_error(ctx, "`head` requires a list");
+    return list->as_pair.head;
+}
+
+yue_Object *yue_builtin_tail(yue_Context *ctx, yue_Object *arg)
+{
+    size_t gc = yue_savegc(ctx);
+    yue_Object *list = yue_eval(ctx, yue_nextarg(ctx, &arg));
+    yue_restoregc(ctx, gc);
+    if(list->type != YUE_OBJECT_PAIR) yue_error(ctx, "`head` requires a list");
+    return list->as_pair.tail;
+}
+
+void yue_load_builtins(yue_Context *ctx)
+{
+    size_t gc = yue_savegc(ctx);
+    yue_set(ctx, yue_symbol(ctx, "print"), yue_cfunc(ctx, yue_builtin_print));
+    yue_set(ctx, yue_symbol(ctx, "+"), yue_cfunc(ctx, yue_builtin_add));
+    yue_set(ctx, yue_symbol(ctx, "-"), yue_cfunc(ctx, yue_builtin_sub));
+    yue_set(ctx, yue_symbol(ctx, "*"), yue_cfunc(ctx, yue_builtin_mul));
+    yue_set(ctx, yue_symbol(ctx, "="), yue_cfunc(ctx, yue_builtin_assign));
+    yue_set(ctx, yue_symbol(ctx, "not"), yue_cfunc(ctx, yue_builtin_not));
+    yue_set(ctx, yue_symbol(ctx, "exit"), yue_cfunc(ctx, yue_builtin_exit));
+    yue_set(ctx, yue_symbol(ctx, "<"), yue_cfunc(ctx, yue_builtin_lt));
+    yue_set(ctx, yue_symbol(ctx, "do"), yue_cfunc(ctx, yue_builtin_dolist));
+    yue_set(ctx, yue_symbol(ctx, "while"), yue_cfunc(ctx, yue_builtin_while));
+    yue_set(ctx, yue_symbol(ctx, "if"), yue_cfunc(ctx, yue_builtin_if));
+    yue_set(ctx, yue_symbol(ctx, "fn"), yue_cfunc(ctx, yue_builtin_fn));
+    yue_set(ctx, yue_symbol(ctx, "list"), yue_cfunc(ctx, yue_builtin_list));
+    yue_set(ctx, yue_symbol(ctx, "head"), yue_cfunc(ctx, yue_builtin_head));
+    yue_set(ctx, yue_symbol(ctx, "tail"), yue_cfunc(ctx, yue_builtin_tail));
+    yue_restoregc(ctx, gc);
+}
+
 static inline bool _isdigit(int c) { return '0' <= c && c <= '9'; }
 static inline bool _isspace(int c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
 
@@ -891,24 +948,6 @@ yue_Object *yue_read(yue_Context *ctx, yue_File *source)
     }
 
     return yue_nil(ctx);
-}
-
-void yue_load_builtins(yue_Context *ctx)
-{
-    size_t gc = yue_savegc(ctx);
-    yue_set(ctx, yue_symbol(ctx, "print"), yue_cfunc(ctx, yue_builtin_print));
-    yue_set(ctx, yue_symbol(ctx, "+"), yue_cfunc(ctx, yue_builtin_add));
-    yue_set(ctx, yue_symbol(ctx, "-"), yue_cfunc(ctx, yue_builtin_sub));
-    yue_set(ctx, yue_symbol(ctx, "*"), yue_cfunc(ctx, yue_builtin_mul));
-    yue_set(ctx, yue_symbol(ctx, "="), yue_cfunc(ctx, yue_builtin_assign));
-    yue_set(ctx, yue_symbol(ctx, "not"), yue_cfunc(ctx, yue_builtin_not));
-    yue_set(ctx, yue_symbol(ctx, "exit"), yue_cfunc(ctx, yue_builtin_exit));
-    yue_set(ctx, yue_symbol(ctx, "<"), yue_cfunc(ctx, yue_builtin_lt));
-    yue_set(ctx, yue_symbol(ctx, "do"), yue_cfunc(ctx, yue_builtin_dolist));
-    yue_set(ctx, yue_symbol(ctx, "while"), yue_cfunc(ctx, yue_builtin_while));
-    yue_set(ctx, yue_symbol(ctx, "if"), yue_cfunc(ctx, yue_builtin_if));
-    yue_set(ctx, yue_symbol(ctx, "fn"), yue_cfunc(ctx, yue_builtin_fn));
-    yue_restoregc(ctx, gc);
 }
 
 

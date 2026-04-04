@@ -1,0 +1,4 @@
+(= b 10)
+(= a (list b b 30 40 50))
+(print (head a))
+(print (tail (tail a)))
