@@ -1,4 +1,4 @@
-CC := clang
+CC ?= clang
 CFLAGS := -Wall -Wextra -pedantic -D_CRT_SECURE_NO_WARNINGS
 LFLAGS := 
 
@@ -15,7 +15,7 @@ yue.exe: main.c
 	$(CC) $(CFLAGS) -o $@ $^ $(LFLAGS)
 
 RAYLIB_CFLAGS := -I$(HOME)/Software/include
-RAYLIB_LFLAGS := -L$(HOME)/Software/lib -lraylib
+RAYLIB_LFLAGS := -L$(HOME)/Software/lib -lraylib -lX11 -lXrandr -lm
 
 raylib.yuedll: yue-raylib.c
 	$(CC) -fPIC -shared $(CFLAGS) $(RAYLIB_CFLAGS) -o $@ $^ $(LFLAGS) $(RAYLIB_LFLAGS)

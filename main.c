@@ -134,9 +134,9 @@ yue_Object *yue_builtin_require_dll(yue_Context *ctx, yue_Object *arg)
     dlls[dlls_count++] = dll;
 #else
     yue_DLL dll = dlopen(filepath, RTLD_NOW);
-    if(dll == NULL) yue_error(ctx, "Failed to load %s\n", filepath);
+    if(dll == NULL) yue_error(ctx, "Failed to load %s: %s\n", filepath, dlerror());
     yue_RequireDLLLoader proc = (yue_RequireDLLLoader)dlsym(dll, "yue_require_dll");
-    if(proc == NULL) yue_error(ctx, "Failed to load yue_require_dll from %s\n", filepath);
+    if(proc == NULL) yue_error(ctx, "Failed to load yue_require_dll from %s: %s\n", filepath, dlerror());
     proc(ctx);
     dlls[dlls_count++] = dll;
 #endif

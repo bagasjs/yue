@@ -134,6 +134,13 @@ struct yue_Object {
             char data[YUE_STRING_DATA_SIZE];
             yue_Object *tail;
         } as_str;
+        // TODO: we need to change symbol's implementation to be based on string (look below).
+        //       With this, we can reduce YUE_STRING_DATA_SIZE. Thus sizeof(yue_Object) is smaller
+        //       which in turn will make our object pool can contain more objects
+        // struct {
+        //     yue_Object *name;
+        //     yue_Object *value;
+        // } as_symbol;
         struct {
             char name[YUE_STRING_DATA_SIZE];
             yue_Object *value;
