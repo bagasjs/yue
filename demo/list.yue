@@ -2,3 +2,9 @@
 (= a (list b b 30 40 50))
 (print (head a))
 (print (tail (tail a)))
+
+(= items a)
+(while (and items (head items)) (do
+    (print (head items))
+    (= items (tail items))
+))

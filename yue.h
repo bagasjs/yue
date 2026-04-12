@@ -849,6 +849,40 @@ yue_Object *yue_builtin_ge(yue_Context *ctx, yue_Object *arg)
     }
 }
 
+yue_Object *yue_builtin_or(yue_Context *ctx, yue_Object *arg)
+{
+    size_t gc = yue_savegc(ctx);
+    yue_Object *lhs = yue_eval(ctx, yue_nextarg(ctx, &arg));
+    if(!yue_isnil(lhs)) {
+        yue_restoregc(ctx, gc);
+        return yue_number(ctx, 1);
+    }
+    yue_Object *rhs = yue_eval(ctx, yue_nextarg(ctx, &arg));
+    if(!yue_isnil(rhs)) {
+        yue_restoregc(ctx, gc);
+        return yue_number(ctx, 1);
+    }
+    yue_restoregc(ctx, gc);
+    return yue_nil(ctx);
+}
+
+yue_Object *yue_builtin_and(yue_Context *ctx, yue_Object *arg)
+{
+    size_t gc = yue_savegc(ctx);
+    yue_Object *lhs = yue_eval(ctx, yue_nextarg(ctx, &arg));
+    if(yue_isnil(lhs)) {
+        yue_restoregc(ctx, gc);
+        return yue_nil(ctx);
+    }
+    yue_Object *rhs = yue_eval(ctx, yue_nextarg(ctx, &arg));
+    if(yue_isnil(rhs)) {
+        yue_restoregc(ctx, gc);
+        return yue_nil(ctx);
+    }
+    yue_restoregc(ctx, gc);
+    return yue_number(ctx, 1);
+}
+
 yue_Object *yue_builtin_ne(yue_Context *ctx, yue_Object *arg)
 {
     size_t gc = yue_savegc(ctx);
@@ -925,6 +959,8 @@ void yue_load_builtins(yue_Context *ctx)
     yue_set(ctx, yue_symbol(ctx, "*"), yue_cfunc(ctx, yue_builtin_mul));
     yue_set(ctx, yue_symbol(ctx, "="), yue_cfunc(ctx, yue_builtin_assign));
     yue_set(ctx, yue_symbol(ctx, "not"), yue_cfunc(ctx, yue_builtin_not));
+    yue_set(ctx, yue_symbol(ctx, "and"), yue_cfunc(ctx, yue_builtin_and));
+    yue_set(ctx, yue_symbol(ctx, "or"), yue_cfunc(ctx, yue_builtin_or));
     yue_set(ctx, yue_symbol(ctx, "lt"), yue_cfunc(ctx, yue_builtin_lt));
     yue_set(ctx, yue_symbol(ctx, "gt"), yue_cfunc(ctx, yue_builtin_gt));
     yue_set(ctx, yue_symbol(ctx, "le"), yue_cfunc(ctx, yue_builtin_le));
