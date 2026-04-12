@@ -1,0 +1,10 @@
+(print (+ 1 1))
+(print (- 1 1))
+(print (* 1 1))
+// TODO: lt, gt, le, ge, ne must only works with number
+(print (lt 1 1)) // less than (<)
+(print (gt 1 1)) // greater than (>)
+(print (le 1 1)) // less equal (<=)
+(print (ge 1 1)) // greater equal (>=)
+(print (ne 1 1)) // not equal (!=)
+// (print (eq 1 1)) // TODO: equal (==). This must works with strings
