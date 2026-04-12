@@ -39,6 +39,7 @@ typedef struct yue_Context yue_Context;
 typedef struct yue_Object yue_Object;
 typedef yue_Object *(*yue_CFunc)(yue_Context *ctx, yue_Object *arg);
 
+#define YUE_FLOAT_EPSILON 1e-6
 typedef double yue_Number;
 
 typedef enum {
@@ -80,6 +81,8 @@ YUE_DEF yue_Number yue_tonumber(yue_Context *ctx, yue_Object *obj);
 YUE_DEF void *yue_touserdata(yue_Context *ctx, yue_Object *obj);
 YUE_DEF size_t yue_getstringlen(yue_Context *ctx, yue_Object *obj);
 YUE_DEF char *yue_tostring(yue_Context *ctx, yue_Object *obj, char *dst, size_t dstsz);
+
+YUE_DEF bool yue_streq(yue_Object *a, yue_Object *b);
 
 // Object constructor
 YUE_DEF yue_Object *yue_nil(yue_Context *ctx);
@@ -580,6 +583,29 @@ bool yue_islist(yue_Object *obj)
     return obj->type == YUE_OBJECT_PAIR;
 }
 
+bool yue_streq(yue_Object *a, yue_Object *b)
+{
+    if(a->type != YUE_OBJECT_STRING) return false;
+    if(b->type != YUE_OBJECT_STRING) return false;
+
+    while(a && b) {
+        size_t i = 0;
+        for(int i = 0; i < 32; ++i) {
+            char c_a = a->as_str.data[i];
+            char c_b = b->as_str.data[i];
+            if(c_a == c_b) {
+                if(c_a == 0) return true;
+                continue;
+            }
+            return false;
+        }
+        a = a->as_str.tail;
+        b = b->as_str.tail;
+    }
+    return true;
+}
+
+
 size_t yue_getstringlen(yue_Context *ctx, yue_Object *obj)
 {
     if(obj->type != YUE_OBJECT_STRING) yue_error(ctx, "Expected a string");
@@ -797,6 +823,49 @@ yue_Object *yue_builtin_if(yue_Context *ctx, yue_Object *arg)
     return res;
 }
 
+yue_Object *yue_builtin_not(yue_Context *ctx, yue_Object *arg)
+{
+    size_t gc = yue_savegc(ctx);
+    yue_Object *any = yue_eval(ctx, yue_nextarg(ctx, &arg));
+    bool isnil = yue_isnil(any);
+    yue_restoregc(ctx, gc);
+    return isnil ? yue_number(ctx, 1) : yue_nil(ctx);
+}
+
+yue_Object *yue_builtin_or(yue_Context *ctx, yue_Object *arg)
+{
+    size_t gc = yue_savegc(ctx);
+    yue_Object *lhs = yue_eval(ctx, yue_nextarg(ctx, &arg));
+    if(!yue_isnil(lhs)) {
+        yue_restoregc(ctx, gc);
+        return yue_number(ctx, 1);
+    }
+    yue_Object *rhs = yue_eval(ctx, yue_nextarg(ctx, &arg));
+    if(!yue_isnil(rhs)) {
+        yue_restoregc(ctx, gc);
+        return yue_number(ctx, 1);
+    }
+    yue_restoregc(ctx, gc);
+    return yue_nil(ctx);
+}
+
+yue_Object *yue_builtin_and(yue_Context *ctx, yue_Object *arg)
+{
+    size_t gc = yue_savegc(ctx);
+    yue_Object *lhs = yue_eval(ctx, yue_nextarg(ctx, &arg));
+    if(yue_isnil(lhs)) {
+        yue_restoregc(ctx, gc);
+        return yue_nil(ctx);
+    }
+    yue_Object *rhs = yue_eval(ctx, yue_nextarg(ctx, &arg));
+    if(yue_isnil(rhs)) {
+        yue_restoregc(ctx, gc);
+        return yue_nil(ctx);
+    }
+    yue_restoregc(ctx, gc);
+    return yue_number(ctx, 1);
+}
+
 yue_Object *yue_builtin_lt(yue_Context *ctx, yue_Object *arg)
 {
     size_t gc = yue_savegc(ctx);
@@ -849,40 +918,6 @@ yue_Object *yue_builtin_ge(yue_Context *ctx, yue_Object *arg)
     }
 }
 
-yue_Object *yue_builtin_or(yue_Context *ctx, yue_Object *arg)
-{
-    size_t gc = yue_savegc(ctx);
-    yue_Object *lhs = yue_eval(ctx, yue_nextarg(ctx, &arg));
-    if(!yue_isnil(lhs)) {
-        yue_restoregc(ctx, gc);
-        return yue_number(ctx, 1);
-    }
-    yue_Object *rhs = yue_eval(ctx, yue_nextarg(ctx, &arg));
-    if(!yue_isnil(rhs)) {
-        yue_restoregc(ctx, gc);
-        return yue_number(ctx, 1);
-    }
-    yue_restoregc(ctx, gc);
-    return yue_nil(ctx);
-}
-
-yue_Object *yue_builtin_and(yue_Context *ctx, yue_Object *arg)
-{
-    size_t gc = yue_savegc(ctx);
-    yue_Object *lhs = yue_eval(ctx, yue_nextarg(ctx, &arg));
-    if(yue_isnil(lhs)) {
-        yue_restoregc(ctx, gc);
-        return yue_nil(ctx);
-    }
-    yue_Object *rhs = yue_eval(ctx, yue_nextarg(ctx, &arg));
-    if(yue_isnil(rhs)) {
-        yue_restoregc(ctx, gc);
-        return yue_nil(ctx);
-    }
-    yue_restoregc(ctx, gc);
-    return yue_number(ctx, 1);
-}
-
 yue_Object *yue_builtin_ne(yue_Context *ctx, yue_Object *arg)
 {
     size_t gc = yue_savegc(ctx);
@@ -896,14 +931,34 @@ yue_Object *yue_builtin_ne(yue_Context *ctx, yue_Object *arg)
     }
 }
 
-yue_Object *yue_builtin_not(yue_Context *ctx, yue_Object *arg)
+yue_Object *yue_builtin_eq(yue_Context *ctx, yue_Object *arg)
 {
     size_t gc = yue_savegc(ctx);
-    yue_Object *any = yue_eval(ctx, yue_nextarg(ctx, &arg));
-    bool isnil = yue_isnil(any);
+    yue_Object *lhs = yue_eval(ctx, yue_nextarg(ctx, &arg));
+    yue_Object *rhs = yue_eval(ctx, yue_nextarg(ctx, &arg));
     yue_restoregc(ctx, gc);
-    return isnil ? yue_number(ctx, 1) : yue_nil(ctx);
+
+    if(lhs->type != rhs->type) return yue_nil(ctx);
+    if(lhs->type == YUE_OBJECT_STRING) {
+        return yue_streq(lhs, rhs) ? yue_number(ctx, 1) : yue_nil(ctx);
+    }
+    if(lhs->type == YUE_OBJECT_NUMBER) {
+        double diff = lhs->as_number - rhs->as_number;
+        bool equal = -YUE_FLOAT_EPSILON < diff && diff < YUE_FLOAT_EPSILON;
+        return equal ? yue_number(ctx, 1) : yue_nil(ctx);
+    }
+    return lhs == rhs ? yue_number(ctx, 1) : yue_nil(ctx);
 }
+
+yue_Object *yue_builtin_streq(yue_Context *ctx, yue_Object *arg)
+{
+    size_t gc = yue_savegc(ctx);
+    yue_Object *a = yue_eval(ctx, yue_nextarg(ctx, &arg));
+    yue_Object *b = yue_eval(ctx, yue_nextarg(ctx, &arg));
+    yue_restoregc(ctx, gc);
+    return yue_streq(a, b) ? yue_number(ctx, 1) : yue_nil(ctx);
+}
+
 
 yue_Object *yue_builtin_exit(yue_Context *ctx, yue_Object *arg)
 {
@@ -961,11 +1016,12 @@ void yue_load_builtins(yue_Context *ctx)
     yue_set(ctx, yue_symbol(ctx, "not"), yue_cfunc(ctx, yue_builtin_not));
     yue_set(ctx, yue_symbol(ctx, "and"), yue_cfunc(ctx, yue_builtin_and));
     yue_set(ctx, yue_symbol(ctx, "or"), yue_cfunc(ctx, yue_builtin_or));
+    yue_set(ctx, yue_symbol(ctx, "eq"), yue_cfunc(ctx, yue_builtin_eq));
+    yue_set(ctx, yue_symbol(ctx, "ne"), yue_cfunc(ctx, yue_builtin_ne));
     yue_set(ctx, yue_symbol(ctx, "lt"), yue_cfunc(ctx, yue_builtin_lt));
     yue_set(ctx, yue_symbol(ctx, "gt"), yue_cfunc(ctx, yue_builtin_gt));
     yue_set(ctx, yue_symbol(ctx, "le"), yue_cfunc(ctx, yue_builtin_le));
     yue_set(ctx, yue_symbol(ctx, "ge"), yue_cfunc(ctx, yue_builtin_ge));
-    yue_set(ctx, yue_symbol(ctx, "ne"), yue_cfunc(ctx, yue_builtin_ne));
     yue_set(ctx, yue_symbol(ctx, "exit"), yue_cfunc(ctx, yue_builtin_exit));
     yue_set(ctx, yue_symbol(ctx, "do"), yue_cfunc(ctx, yue_builtin_dolist));
     yue_set(ctx, yue_symbol(ctx, "while"), yue_cfunc(ctx, yue_builtin_while));
@@ -974,6 +1030,7 @@ void yue_load_builtins(yue_Context *ctx)
     yue_set(ctx, yue_symbol(ctx, "list"), yue_cfunc(ctx, yue_builtin_list));
     yue_set(ctx, yue_symbol(ctx, "head"), yue_cfunc(ctx, yue_builtin_head));
     yue_set(ctx, yue_symbol(ctx, "tail"), yue_cfunc(ctx, yue_builtin_tail));
+    yue_set(ctx, yue_symbol(ctx, "streq"), yue_cfunc(ctx, yue_builtin_streq));
     yue_restoregc(ctx, gc);
 }
 
