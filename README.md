@@ -1,0 +1,70 @@
+# Yue
+A small scripting language
+
+## Example
+1. Hello World
+```yue
+print("Hello, World")
+```
+
+2. Variable
+```yue
+var a = 10;   // integer
+var b = 20.5; // float
+var c = "Hello, World"; // string
+var d = [ a, b, c ]; // array
+var e = { "name": "foo", "age": d[0] }; // table
+print(e["name"])
+```
+
+3. Branching
+```yue
+if(age < 10) {
+    print("You are child")
+} else if(10 <= age && age < 17) {
+    print("You are teenage")
+} else {
+    print("You are adult")
+}
+```
+
+4. Loop
+```yue
+var i = 0;
+while(i < 10) {
+    i = i + 1;
+}
+```
+
+5. Function
+```yue
+fun main(args) {
+    print("Hello, World")
+    return 0;
+}
+```
+
+6. C FFI
+```c
+#include "yue.h"
+#include "raylib.h"
+
+yue_value f_init_window(yue_context *ctx, yue_value *args, int argc)
+{
+    if(argc < 3) yue_errorf(ctx, "this function requires more than 3 arguments got %d", argc);
+    int width  = yue_toint(ctx, args[0]);
+    int height = yue_toint(ctx, args[1]);
+    const char * title = yue_tocstr(ctx, args[2]);
+    InitWindow(width, height, title);
+    return yue_nil(ctx, 0);
+}
+
+int main(int argc, char *argv[]) {
+    yue_context *ctx = yue_newcontext();
+
+    yue_globals_set(ctx, "init_window", yue_cfunc(f_init_window));
+
+    yue_dofile(ctx, argv[1]);
+}
+
+```
