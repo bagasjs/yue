@@ -115,7 +115,7 @@ typedef struct Runtime {
 
 bool runtime_hasglobal(Runtime *runtime, const char *name)
 {
-    return (intptr_t)(void*)shtable_geti(&runtime->globals_nametable, name);
+    return (intptr_t)(void*)shtable_geti(&runtime->globals_nametable, name) >= 0;
 }
 
 int runtime_getglobal(Runtime *runtime, const char *name)
@@ -325,7 +325,6 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module)
                 sa_append(&module->insts, ((Inst){ .opcode = OP_LOCAL_GET, .arg = scope_getvar(parser, name) }));
             } else {
                 if(runtime_hasglobal(parser->runtime, name)) {
-                    
                     sa_append(&module->insts, ((Inst){ .opcode = OP_GLOBAL_GET, 
                                 .arg = runtime_getglobal(parser->runtime, name) }));
                 } else {
