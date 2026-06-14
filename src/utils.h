@@ -152,7 +152,8 @@ ASSERT((sa)),                                   \
 ASSERT((sa)->items),                            \
 ASSERT((sa)->count < (sa)->capacity),           \
 memcpy((sa)->items + (sa)->count, (newitems),   \
-    (n_items)*sizeof(*(sa)->items))             \
+    (n_items)*sizeof(*(sa)->items)),            \
+(sa)->count += (n_items)                        \
 )
 
 typedef struct StringBuilder {
