@@ -7,6 +7,7 @@ typedef enum Op {
     OP_NOP = 0,
     OP_PUSH_INT,
     OP_PUSH_FLT,
+    OP_PUSH_STR,
 
     OP_ADD,
     OP_SUB,
@@ -85,16 +86,33 @@ typedef enum {
     VALUE_NIL = 0,
     VALUE_INT,
     VALUE_FLT,
-    VALUE_STR,
     VALUE_OBJ,
 } ValueKind;
+
+typedef enum {
+    OBJECT_NIL = 0,
+    OBJECT_STRING,
+    OBJECT_ARRAY,
+} ObjectKind;
+
+typedef struct Object Object;
+struct Object {
+    Object    *next;
+    ObjectKind kind;
+    bool       marked;
+};
+
+typedef struct {
+    Object base;
+    StringBuilder sb;
+} ObjectString;
 
 typedef struct {
     ValueKind kind;
     union {
-        int   intv;
-        float fltv;
-        const char *strv;
+        int     intv;
+        float   fltv;
+        Object *objv;
     };
 } Value;
 
@@ -111,6 +129,15 @@ typedef struct Runtime {
         size_t capacity;
     } globals;
     shtable_t globals_nametable;
+
+    struct {
+        Object **items;
+        size_t   count;
+        size_t  capacity;
+    } all;
+
+    Stack stack;
+    Value locals[1024];
 } Runtime;
 
 bool runtime_hasglobal(Runtime *runtime, const char *name)
@@ -134,18 +161,96 @@ void runtime_setglobal(Runtime *runtime, const char *name, Value value)
         int global = (intptr_t)runtime->globals_nametable.items[shtable_item_slot].value;
         runtime->globals.items[global] = value;
     }
+}
 
+void runtime_mark_object(Runtime *runtime, Object *object)
+{
+    object->marked = true;
+}
+
+void runtime_mark_used_objects(Runtime *runtime)
+{
+    // Mark objects in global variables
+    for(size_t i = 0; i < runtime->globals.count; ++i) {
+        Value val = runtime->globals.items[i];
+        if(val.kind == VALUE_OBJ) 
+            runtime_mark_object(runtime, val.objv);
+    }
+    // Mark objects in local variables
+    for(size_t i = 0; i < ARRLEN(runtime->locals); ++i) {
+        Value val = runtime->locals[i];
+        if(val.kind == VALUE_OBJ) 
+            runtime_mark_object(runtime, val.objv);
+    }
+    // Mark objects in stack
+    for(size_t i = 0; i < runtime->stack.count; ++i) {
+        Value val = runtime->stack.items[i];
+        if(val.kind == VALUE_OBJ) 
+            runtime_mark_object(runtime, val.objv);
+    }
+}
+
+void runtime_sweep_unused_objects(Runtime *runtime)
+{
+    for(size_t i = 0; i < runtime->all.count;) {
+        Object *obj = runtime->all.items[i];
+        if(obj->marked) {
+            obj->marked = false;
+            ++i;
+        } else {
+            // TODO: object_destroy to handle destroying object
+            free(obj);
+            da_remove_unordered(&runtime->all, i);
+        }
+    }
+}
+
+Object *runtime_newobject(Runtime *runtime, ObjectKind kind, size_t size)
+{
+    ASSERT(size >= sizeof(Object));
+    Object *obj  = malloc(size);
+    obj->kind = kind;
+    obj->marked = false;
+    if(runtime->all.count + 1 > runtime->all.capacity) {
+        if(runtime->all.capacity == 0) {
+            runtime->all.capacity = 256;
+            runtime->all.items = malloc(runtime->all.capacity * sizeof(*runtime->all.items));
+        } else {
+            runtime_mark_used_objects(runtime);
+            runtime_sweep_unused_objects(runtime);
+            if(runtime->all.count + 1 > runtime->all.capacity) {
+                runtime->all.capacity *= 2;
+                void *items = malloc(runtime->all.capacity * sizeof(*runtime->all.items));
+                ASSERT(items != NULL && "Buy More RAM LOL!");
+                memcpy(items, runtime->all.items, runtime->all.count * sizeof(*runtime->all.items));
+                free(runtime->all.items);
+                runtime->all.items = items;
+            }
+        }
+    }
+    runtime->all.items[runtime->all.count++] = obj;
+    return obj;
+}
+
+Object *runtime_pushnewstring(Runtime *runtime, const char *init_text)
+{
+    ObjectString *obj = (ObjectString*)runtime_newobject(runtime, OBJECT_STRING, sizeof(ObjectString));
+    obj->sb.count    = 0;
+    obj->sb.capacity = 0;
+    obj->sb.items    = 0;
+    if(init_text) 
+        sb_appendf(&obj->sb, "%s", init_text);
+    sa_append(&runtime->stack, ((Value){ .kind = VALUE_OBJ, .objv = (Object*)obj }));
+    return (Object*)obj;
 }
 
 bool run_module(Module *module, Runtime *runtime)
 {
     size_t pc = 0;
 
-    Value locals[1024] = {0};
     Value stack_values[1024];
-    Stack stack = {0};
-    stack.items = stack_values;
-    stack.capacity = ARRLEN(stack_values);
+    runtime->stack.items = stack_values;
+    runtime->stack.capacity = ARRLEN(stack_values);
 
     while(1) {
         if(pc >= module->insts.count) break;
@@ -154,17 +259,21 @@ bool run_module(Module *module, Runtime *runtime)
             case OP_NOP:
                 break;
             case OP_PUSH_INT:
-                sa_append(&stack, ((Value){ .kind = VALUE_INT, .intv = module->intconsts.items[inst.arg] }));
+                sa_append(&runtime->stack, ((Value){ .kind = VALUE_INT, .intv = module->intconsts.items[inst.arg] }));
                 break;
             case OP_PUSH_FLT:
-                sa_append(&stack, ((Value){ .kind = VALUE_FLT, .fltv = module->fltconsts.items[inst.arg] }));
+                sa_append(&runtime->stack, ((Value){ .kind = VALUE_FLT, .fltv = module->fltconsts.items[inst.arg] }));
                 break;
+            case OP_PUSH_STR:
+                runtime_pushnewstring(runtime, &module->strconsts.items[inst.arg]);
+                break;
+
             case OP_ADD:
             case OP_MUL:
             case OP_SUB:
                 {
-                    Value a = sa_pop(&stack);
-                    Value b = sa_pop(&stack);
+                    Value a = sa_pop(&runtime->stack);
+                    Value b = sa_pop(&runtime->stack);
                     ASSERT(a.kind == b.kind && a.kind == VALUE_INT);
                     switch(inst.opcode) {
                     case OP_ADD:
@@ -180,22 +289,22 @@ bool run_module(Module *module, Runtime *runtime)
                         ASSERT(0 && "Unreachable");
                         break;
                     }
-                    sa_append(&stack, b); 
+                    sa_append(&runtime->stack, b); 
                 } break;
 
             case OP_LOCAL_SET:
                 {
-                    Value a = sa_pop(&stack);
-                    locals[inst.arg] = a;
+                    Value a = sa_pop(&runtime->stack);
+                    runtime->locals[inst.arg] = a;
                 } break;
             case OP_LOCAL_GET:
                 {
-                    sa_append(&stack, locals[inst.arg]);
+                    sa_append(&runtime->stack, runtime->locals[inst.arg]);
                 } break;
             case OP_GLOBAL_GET:
                 {
                     Value value = runtime->globals.items[inst.arg];
-                    sa_append(&stack, value);
+                    sa_append(&runtime->stack, value);
                 } break;
 
             case OP_JMP:
@@ -208,7 +317,7 @@ bool run_module(Module *module, Runtime *runtime)
                 break;
             case OP_PRINT:
                 {
-                    Value a = sa_pop(&stack);
+                    Value a = sa_pop(&runtime->stack);
                     switch(a.kind) {
                         case VALUE_NIL:
                             printf("<nil>\n");
@@ -219,11 +328,25 @@ bool run_module(Module *module, Runtime *runtime)
                         case VALUE_INT:
                             printf("%d\n", a.intv);
                             break;
-                        case VALUE_STR:
-                            printf("%s\n", a.strv);
-                            break;
                         case VALUE_OBJ:
-                            printf("<object>\n");
+                            {
+                                switch(a.objv->kind) {
+                                case OBJECT_STRING:
+                                    {
+                                        ObjectString *str = (ObjectString*)a.objv;
+                                        printf("%.*s\n", (int)str->sb.count, str->sb.items);
+                                    } break;
+                                case OBJECT_ARRAY:
+                                    ASSERT(0 && "Not implemented");
+                                    break;
+                                default:
+                                    ASSERT(0 && "Unreachable");
+                                    break;
+                                }
+                            } break;
+                        default:
+                            ASSERT(0 && "Unreachable");
+                            break;
                     }
                 } break;
         }
@@ -300,8 +423,6 @@ void scope_setvar(Parser *parser, const char *name, int slot)
     shtable_set(&parser->scopes.items[parser->scopes.count - 1], name, (void*)(intptr_t)slot);
 }
 
-bool parse_expr(Parser *parser, Lexer *lex, Module *module);
-
 bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module)
 {
     if(!lexer_get_token(lex)) return false;
@@ -317,6 +438,12 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module)
             int arg = module->fltconsts.count;
             sa_append(&module->fltconsts, lex->real_number);
             sa_append(&module->insts, ((Inst){ .opcode = OP_PUSH_FLT, .arg = arg }));
+        } break;
+    case TOKEN_STRING_LIT:
+        {
+            int arg = module->strconsts.count;
+            sa_append_many(&module->strconsts, lex->string, cstrsz(lex->string));
+            sa_append(&module->insts, ((Inst){ .opcode = OP_PUSH_STR, .arg = arg }));
         } break;
     case TOKEN_ID:
         {

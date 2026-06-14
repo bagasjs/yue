@@ -122,6 +122,12 @@ size_t cstrsz(const char *cstr); // size includes the zero termination
         (da)->count += (new_items_count);                           \
     } while(0)
 
+#define da_remove_unordered(da, index)                     \
+    do {                                                   \
+        ASSERT((index) < (da)->count);                     \
+        (da)->items[(index)] = (da)->items[--(da)->count]; \
+    } while(0)
+
 
 #define ARRLEN(xs) (sizeof(xs)/sizeof(*xs))
 
@@ -140,13 +146,13 @@ ASSERT((sa)->items),                    \
 ASSERT((sa)->count < (sa)->capacity),   \
 (sa)->items[(sa)->count++] = item       \
 )
-#define sa_append_many(sa, newitems, count)     \
+#define sa_append_many(sa, newitems, n_items)   \
 (                                               \
 ASSERT((sa)),                                   \
 ASSERT((sa)->items),                            \
 ASSERT((sa)->count < (sa)->capacity),           \
 memcpy((sa)->items + (sa)->count, (newitems),   \
-    (count)*sizeof(*(sa)->items));              \
+    (n_items)*sizeof(*(sa)->items))             \
 )
 
 typedef struct StringBuilder {
