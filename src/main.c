@@ -253,11 +253,13 @@ void runtime_destroy_object(Runtime *runtime, Object *object)
         {
             ObjectString *str = (ObjectString*)object;
             free(str->items);
+            free(str);
         } break;
     case OBJECT_ARRAY:
         {
             ObjectArray *arr = (ObjectArray*)object;
             free(arr->items);
+            free(arr);
         } break;
     default:
         ASSERT(0 && "Unreachable");
