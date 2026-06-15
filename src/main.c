@@ -1012,6 +1012,14 @@ void dump_module(Module *module)
     printf("}\n");
 }
 
+#ifndef YUE_NO_EASTER_EGG
+#include <stdlib.h>
+#include <time.h>
+int rand_range(int min, int max) {
+    return (rand() % (max - min + 1)) + min;
+}
+#endif
+
 int main(int argc, char *argv[]) {
     StringBuilder source = {0};
     if(argc < 2) {
@@ -1019,8 +1027,34 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Usage: %s <source.yue>\n", argv[0]);
         return -1;
     }
-
     const char *source_filepath = argv[1];
+
+#ifndef YUE_NO_EASTER_EGG
+    // The name Yue is inspired by a character in one of
+    // my favorite game, Rune Factory 2. Never finished it though.
+    // The second generation kinda tough to beat.
+    srand(time(NULL));
+    if(strcmp(source_filepath, "A") == 0) { // You clicked the A button LUL
+        static const char *talks[] = {
+            "Morning!",
+            "Hello!",
+            "Good evening!",
+            "Thank you!",
+            "Welcome!",
+            "What's up!",
+            "The name's Yue, I am a traveling merchant",
+            "Is that for me? Thanks!♪ I really love these! ♪",
+            "You can't have my Aquamarine! Is that for me? Thanks!♪ Sparkle sparkle! What can I say, "
+                "I just can't resist them!♪",
+            "Is that really for me? Thanks! I can certainly put that to good use.",
+            "Oh... you don't have to give me that much! I don't like slimy things... "
+                "Don't like slimy things at all! Ugh, they make me feel sick! I certainly don't need all this!",
+        };
+        int d = rand_range(0, ARRLEN(talks) - 1);
+        printf("Yue: %s\n", talks[d]);
+        return 0;
+    }
+#endif
     if(!read_entire_file(source_filepath, &source)) return -1;
 
     Inst  insts[1024] = {0};
