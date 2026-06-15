@@ -296,7 +296,7 @@ Object *runtime_newobject(Runtime *runtime, ObjectKind kind, size_t size)
             if(runtime->all.count + 1 > runtime->all.capacity) {
                 runtime->all.capacity *= 2;
                 void *items = malloc(runtime->all.capacity * sizeof(*runtime->all.items));
-                ASSERT(items != NULL && "Buy More RAM LOL!");
+                ASSERT(items != NULL && "Yue: Your backpack is full!");
                 memcpy(items, runtime->all.items, runtime->all.count * sizeof(*runtime->all.items));
                 free(runtime->all.items);
                 runtime->all.items = items;
