@@ -208,6 +208,7 @@ void runtime_setglobal(Runtime *runtime, const char *name, Value value)
 
 void runtime_mark_object(Runtime *runtime, Object *object)
 {
+    if(object->marked) return;
     object->marked = true;
     if(object->kind == OBJECT_ARRAY) {
         ObjectArray *arr = (ObjectArray*)object;
