@@ -781,7 +781,7 @@ bool parse_expr_binop5(Parser *parser, Lexer *lex, Module *module)
 
 bool parse_expr_binop6(Parser *parser, Lexer *lex, Module *module)
 {
-    if(!parse_expr_binop4(parser, lex, module)) return false;
+    if(!parse_expr_binop5(parser, lex, module)) return false;
     while(1) {
         ParsePoint savedp = lex->parse_point;
         if(!lexer_get_token(lex)) return false;
@@ -795,14 +795,14 @@ bool parse_expr_binop6(Parser *parser, Lexer *lex, Module *module)
                 lex->parse_point = savedp;
                 return true;
         }
-        if(!parse_expr_binop4(parser, lex, module)) return false;
+        if(!parse_expr_binop5(parser, lex, module)) return false;
         sa_append(&module->insts, ((Inst){ .opcode = op, }));
     }
 }
 
 bool parse_expr(Parser *parser, Lexer *lex, Module *module)
 {
-    if(!parse_expr_binop5(parser, lex, module)) return false;
+    if(!parse_expr_binop6(parser, lex, module)) return false;
     return true;
 }
 
