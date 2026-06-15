@@ -85,6 +85,7 @@ void lexer_diagf(Loc loc, const char *fmt, ...);
     X(DIV          , "/"  ) \
     X(OREQ         , "|=" ) \
     X(OR           , "|"  ) \
+    X(OROR         , "||" ) \
     X(ANDEQ        , "&=" ) \
     X(ANDAND       , "&&" ) \
     X(AND          , "&"  ) \

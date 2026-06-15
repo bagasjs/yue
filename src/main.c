@@ -243,6 +243,7 @@ void runtime_mark_used_objects(Runtime *runtime)
 
 void runtime_destroy_object(Runtime *runtime, Object *object)
 {
+    (void)runtime;
     switch(object->kind) {
     case OBJECT_NIL:
         free(object);
@@ -328,16 +329,17 @@ Object *runtime_pushnewarray(Runtime *runtime)
 void print_value(Value *values, size_t count)
 {
     for(size_t i = 0; i < count; ++i) {
+        if(i != 0) printf(" ");
         Value a = values[i];
         switch(a.kind) {
             case VALUE_NIL:
-                printf("<nil>\n");
+                printf("<nil>");
                 break;
             case VALUE_FLT:
-                printf("%f\n", a.fltv);
+                printf("%f", a.fltv);
                 break;
             case VALUE_INT:
-                printf("%d\n", a.intv);
+                printf("%d", a.intv);
                 break;
             case VALUE_OBJ:
                 {
@@ -345,7 +347,7 @@ void print_value(Value *values, size_t count)
                         case OBJECT_STRING:
                             {
                                 ObjectString *str = (ObjectString*)a.objv;
-                                printf("%.*s\n", (int)str->count, str->items);
+                                printf("%.*s", (int)str->count, str->items);
                             } break;
                         case OBJECT_ARRAY:
                             ASSERT(0 && "Not implemented");
@@ -360,6 +362,7 @@ void print_value(Value *values, size_t count)
                 break;
         }
     }
+    printf("\n");
 }
 
 bool run_module(Module *module, Runtime *runtime)
@@ -369,6 +372,9 @@ bool run_module(Module *module, Runtime *runtime)
     Value stack_values[1024];
     runtime->stack.items = stack_values;
     runtime->stack.capacity = ARRLEN(stack_values);
+
+    int print_n_cycles  = 0;
+    int printed_n_times = 0;
 
     while(1) {
         if(pc >= module->insts.count) break;
@@ -429,7 +435,7 @@ bool run_module(Module *module, Runtime *runtime)
                     ASSERT(item.kind  == VALUE_INT);
                     ASSERT(objv.objv->kind == OBJECT_STRING);
                     ObjectString *str = (ObjectString*)objv.objv;
-                    ASSERT(index.intv < str->count);
+                    ASSERT(index.intv < (int)str->count);
                     str->items[index.intv] = item.intv;
                 } break;
 
@@ -506,12 +512,12 @@ bool run_module(Module *module, Runtime *runtime)
 
             case OP_JMP:
                 {
-                    ASSERT(inst.arg < module->labels.count);
+                    ASSERT(inst.arg < (int)module->labels.count);
                     pc = module->labels.items[inst.arg];
                 } break;
             case OP_JEZ:
                 {
-                    ASSERT(inst.arg < module->labels.count);
+                    ASSERT(inst.arg < (int)module->labels.count);
                     size_t new_pc = module->labels.items[inst.arg];
 
                     Value a = sa_pop(&runtime->stack);
@@ -529,19 +535,24 @@ bool run_module(Module *module, Runtime *runtime)
                 } break;
             case OP_PRINT:
                 {
-                    Value a = sa_pop(&runtime->stack);
-                    print_value(&a, 1);
+                    ASSERT(inst.arg <= (int)runtime->stack.count);
+                    Value *start = &runtime->stack.items[runtime->stack.count - inst.arg];
+                    runtime->stack.count -= inst.arg;
+                    print_value(start, inst.arg);
                 } break;
         }
 
-        /*printf("=========================\n");*/
-        /*printf("[%zu] %s %d\n", pc, opcode_names[inst.opcode], inst.arg);*/
-        /*printf("STACK\n");*/
-        /*for(size_t i = 0; i < runtime->stack.count; ++i) {*/
-        /*    Value a = runtime->stack.items[i];*/
-        /*    print_value(&a, 1);*/
-        /*}*/
-        /*printf("=========================\n");*/
+        if(printed_n_times < print_n_cycles) {
+            printed_n_times += 1;
+            printf("=========================\n");
+            printf("[%zu] %s %d\n", pc, opcode_names[inst.opcode], inst.arg);
+            printf("STACK\n");
+            for(size_t i = 0; i < runtime->stack.count; ++i) {
+                Value a = runtime->stack.items[i];
+                print_value(&a, 1);
+            }
+            printf("=========================\n");
+        }
 
     }
     return true;
@@ -584,7 +595,14 @@ bool scope_hasvar(Parser *parser, const char *name)
 
 int scope_getvar(Parser *parser, const char *name)
 {
-    return (intptr_t)shtable_get(&parser->scopes.items[parser->scopes.count - 1], name);
+    int start = parser->scopes.count - 1;
+    for(int scope = start; scope >= 0; --scope) {
+        int index = shtable_geti(&parser->scopes.items[scope], name);
+        if(index >= 0) {
+            return (intptr_t)parser->scopes.items[scope].items[index].value;
+        }
+    }
+    return -1;
 }
 
 void scope_setvar(Parser *parser, const char *name, int slot)
@@ -748,7 +766,7 @@ bool parse_expr_binop5(Parser *parser, Lexer *lex, Module *module)
         if(!lexer_get_token(lex)) return false;
         Opcode op = {0};
         switch(lex->token) {
-            case TOKEN_AND:
+            case TOKEN_ANDAND:
                 op = OP_AND;
                 break;
             default:
@@ -769,7 +787,7 @@ bool parse_expr_binop6(Parser *parser, Lexer *lex, Module *module)
         if(!lexer_get_token(lex)) return false;
         Opcode op = {0};
         switch(lex->token) {
-            case TOKEN_OR:
+            case TOKEN_OROR:
                 op = OP_OR;
                 break;
             default:
@@ -791,6 +809,7 @@ bool parse_expr(Parser *parser, Lexer *lex, Module *module)
 bool parse_block(Parser *parser, Lexer *lex, Module *module);
 bool parse_stmt(Parser *parser, Lexer *lex, Module *module)
 {
+    if(!lexer_get_token(lex)) return false;
     switch(lex->token) {
         case TOKEN_VAR:
             {
@@ -821,34 +840,13 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module)
                 if(!lexer_get_and_expect_token(lex, TOKEN_OPAREN)) return false;
                 if(!parse_expr(parser, lex, module)) return false;
 
-                sa_append(&module->insts, ((Inst){ .opcode = OP_JEZ, .arg = label_end }));
-
                 // Check if the top of the stack is true
+                sa_append(&module->insts, ((Inst){ .opcode = OP_JEZ, .arg = label_end }));
 
                 if(!lexer_get_and_expect_token(lex, TOKEN_CPAREN)) return false;
                 if(!lexer_get_and_expect_token(lex, TOKEN_OCURLY)) return false;
-
-                scope_begin(parser);
-                while(1) {
-                    ParsePoint savedp = lex->parse_point;
-                    if(!lexer_get_token(lex)) return false;
-                    if(lex->token == TOKEN_CCURLY) {
-                        lex->parse_point = savedp;
-                        break;
-                    }
-                    if(lex->token == TOKEN_BREAK) {
-                        sa_append(&module->insts, ((Inst){ .opcode = OP_JMP, .arg = label_end }));
-                        continue;
-                    } else if(lex->token == TOKEN_CONTINUE) {
-                        sa_append(&module->insts, ((Inst){ .opcode = OP_JMP, .arg = label_start }));
-                        continue;
-                    } else {
-                        if(!parse_stmt(parser, lex, module)) return false;
-                    }
-                    arena_reset(parser->temp_arena);
-                }
-                scope_end(parser);
-
+                // TODO: support for continue and break statement
+                if(!parse_block(parser, lex, module)) return false;
                 if(!lexer_get_and_expect_token(lex, TOKEN_CCURLY)) return false;
                 sa_append(&module->insts, ((Inst){ .opcode = OP_JMP, .arg = label_start }));
                 sa_append(&module->insts, ((Inst){ .opcode = OP_NOP, }));
@@ -858,6 +856,72 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module)
             } break;
         case TOKEN_IF:
             {
+                if(!lexer_get_and_expect_token(lex, TOKEN_OPAREN)) return false;
+                if(!parse_expr(parser, lex, module)) return false;
+                if(!lexer_get_and_expect_token(lex, TOKEN_CPAREN)) return false;
+                // Check if the top of the stack is true and jump to the pre-alloacted label_next
+                size_t label_next = module->labels.count;
+                sa_append(&module->labels, 0);
+                sa_append(&module->insts, ((Inst){ .opcode = OP_JEZ, .arg = label_next }));
+
+                if(!lexer_get_and_expect_token(lex, TOKEN_OCURLY)) return false;
+                if(!parse_block(parser, lex, module)) return false;
+                if(!lexer_get_and_expect_token(lex, TOKEN_CCURLY)) return false;
+
+                ParsePoint savedp = lex->parse_point;
+                if(!lexer_get_token(lex)) return false;
+                if(lex->token != TOKEN_ELSE) {
+                    lex->parse_point = savedp;
+                    // patch label_next to the end of this if() {} statement
+                    sa_append(&module->insts, ((Inst){ .opcode = OP_NOP, }));
+                    module->labels.items[label_next] = module->insts.count - 1;
+                } else {
+                    // pre-allocate the end label
+                    size_t label_end  = module->labels.count;
+                    sa_append(&module->labels, 0);
+                    // the first if statement will jump to label_end as soon as it finished it's body
+                    sa_append(&module->insts, ((Inst){ .opcode = OP_JMP, .arg = label_end }));
+
+                    while(lex->token == TOKEN_ELSE) {
+                        if(!lexer_get_token(lex)) return false;
+                        if(lex->token == TOKEN_IF) {
+                            // else if
+                            // patch label_next for the previous if to jump if it's condition is false
+                            sa_append(&module->insts, ((Inst){ .opcode = OP_NOP, }));
+                            module->labels.items[label_next] = module->insts.count - 1;
+
+                            if(!lexer_get_and_expect_token(lex, TOKEN_OPAREN)) return false;
+                            if(!parse_expr(parser, lex, module)) return false;
+                            if(!lexer_get_and_expect_token(lex, TOKEN_CPAREN)) return false;
+                            // Check if the top of the stack is true and jump to the pre-alloacted label_next
+                            label_next = module->labels.count;
+                            sa_append(&module->labels, 0);
+                            sa_append(&module->insts, ((Inst){ .opcode = OP_JEZ, .arg = label_next }));
+
+                            if(!lexer_get_and_expect_token(lex, TOKEN_OCURLY)) return false;
+                            if(!parse_block(parser, lex, module)) return false;
+                            if(!lexer_get_and_expect_token(lex, TOKEN_CCURLY)) return false;
+                            // After finished just go to label_end
+                            sa_append(&module->insts, ((Inst){ .opcode = OP_JMP, .arg = label_end }));
+
+                            if(!lexer_get_token(lex)) return false;
+                        } else {
+                            // else 
+                            // patch label_next for the previous if to jump if it's condition is false
+                            sa_append(&module->insts, ((Inst){ .opcode = OP_NOP, }));
+                            module->labels.items[label_next] = module->insts.count - 1;
+
+                            if(!lexer_expect_token(lex, TOKEN_OCURLY)) return false;
+                            if(!parse_block(parser, lex, module)) return false;
+                            if(!lexer_get_and_expect_token(lex, TOKEN_CCURLY)) return false;
+                            // lastly patch label_end so after each branches finished their body they can
+                            // jump to the end of the entire branch statement
+                            sa_append(&module->insts, ((Inst){ .opcode = OP_NOP, }));
+                            module->labels.items[label_end] = module->insts.count - 1;
+                            break;
+                        }
+                    }
+                }
             } break;
         case TOKEN_ID:
             {
@@ -874,12 +938,25 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module)
                 sa_append(&module->insts, ((Inst){ .opcode = OP_LOCAL_SET, .arg = local_slot }));
             } break;
         case TOKEN_PRINT:
-            if(!parse_expr(parser, lex, module)) return false;
-            sa_append(&module->insts, ((Inst){ .opcode = OP_PRINT }));
+            {
+                size_t n = 1;
+                while(true) {
+                    if(!parse_expr(parser, lex, module)) return false;
+                    ParsePoint savedp = lex->parse_point;
+                    if(!lexer_get_token(lex)) return false;
+                    if(lex->token != TOKEN_COMMA) {
+                        sa_append(&module->insts, ((Inst){ .opcode = OP_PRINT, .arg = n }));
+                        lex->parse_point = savedp;
+                        break;
+                    }
+                    n += 1;
+                }
+            } break;
+        case TOKEN_SEMICOLON:
             break;
         default:
             fprintf(stderr, "invalid token %s\n", lexer_display_token(lex->token));
-            break;
+            return false;
     }
     return true;
 }
@@ -894,6 +971,7 @@ bool parse_block(Parser *parser, Lexer *lex, Module *module)
             lex->parse_point = savedp;
             break;
         }
+        lex->parse_point = savedp;
         if(!parse_stmt(parser, lex, module)) return false;
         arena_reset(parser->temp_arena);
     }
@@ -908,11 +986,30 @@ bool parse_program(Parser *parser, Lexer *lex, Module *module)
         ParsePoint savedp = lex->parse_point;
         if(!lexer_get_token(lex)) return false;
         if(lex->token == TOKEN_EOF) break;
+        lex->parse_point = savedp;
         if(!parse_stmt(parser, lex, module)) return false;
         arena_reset(parser->temp_arena);
     }
     scope_end(parser);
     return true;
+}
+
+void dump_module(Module *module)
+{
+    for(size_t pc = 0; pc < module->insts.count; ++pc) {
+        Inst inst = module->insts.items[pc];
+        printf("[%zu] %s %d\n", pc, opcode_names[inst.opcode], inst.arg);
+    }
+    printf("int_consts = {\n");
+    for(size_t i = 0; i < module->intconsts.count; ++i) {
+        printf("    [%zu] = %d\n", i, module->intconsts.items[i]);
+    }
+    printf("}\n");
+    printf("labels = {\n");
+    for(size_t i = 0; i < module->labels.count; ++i) {
+        printf("    [%zu] = %zu\n", i, module->labels.items[i]);
+    }
+    printf("}\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -963,6 +1060,7 @@ int main(int argc, char *argv[]) {
     parser.runtime = &runtime;
 
     if(!parse_program(&parser, &lexer, &module)) return -1;
+    /*dump_module(&module);*/
     if(!run_module(&module, &runtime)) return false;
 
     arena_destroy(&prog_arena);
