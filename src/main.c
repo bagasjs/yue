@@ -12,14 +12,34 @@ typedef enum Op {
     OP_ADD,
     OP_SUB,
     OP_MUL,
+    OP_EQ,
+    OP_NE,
+    OP_GT,
+    OP_GE,
+    OP_LT,
+    OP_LE,
+    OP_AND,
+    OP_OR,
+
+    OP_STRING_CONCAT,
+    OP_STRING_LENGTH,
+    OP_STRING_GET,
+    OP_STRING_SET,
+
+    /*OP_ARRAY_NEW,*/
+    /*OP_ARRAY_POP,*/
+    /*OP_ARRAY_APPEND,*/
+    /*OP_ARRAY_INSERT,*/
+    /*OP_ARRAY_REMOVE,*/
+    /*OP_ARRAY_LENGTH,*/
+    /*OP_ARRAY_CONCAT,*/
 
     OP_LOCAL_SET,
     OP_LOCAL_GET,
     OP_GLOBAL_GET,
 
-    OP_LABEL,
     OP_JMP,
-    OP_JNZ,
+    OP_JEZ,
     OP_PRINT,
 } Opcode;
 
@@ -27,18 +47,31 @@ const char *opcode_names[] = {
     [OP_NOP] = "OP_NOP",
     [OP_PUSH_INT] = "OP_PUSH_INT",
     [OP_PUSH_FLT] = "OP_PUSH_FLT",
+    [OP_PUSH_STR] = "OP_PUSH_STR",
 
     [OP_ADD] = "OP_ADD",
     [OP_SUB] = "OP_SUB",
     [OP_MUL] = "OP_MUL",
+    [OP_EQ] = "OP_EQ",
+    [OP_NE] = "OP_NE",
+    [OP_GT] = "OP_GT",
+    [OP_GE] = "OP_GE",
+    [OP_LT] = "OP_LT",
+    [OP_LE] = "OP_LE",
+    [OP_AND] = "OP_AND",
+    [OP_OR] = "OP_OR",
+
+    [OP_STRING_CONCAT] = "OP_STRING_CONCAT",
+    [OP_STRING_LENGTH] = "OP_STRING_LENGTH",
+    [OP_STRING_GET] = "OP_STRING_GET",
+    [OP_STRING_SET] = "OP_STRING_SET",
 
     [OP_LOCAL_SET] = "OP_LOCAL_SET",
     [OP_LOCAL_GET] = "OP_LOCAL_GET",
     [OP_GLOBAL_GET] = "OP_GLOBAL_GET",
 
-    [OP_LABEL] = "OP_LABEL",
     [OP_JMP] = "OP_JMP",
-    [OP_JNZ] = "OP_JNZ",
+    [OP_JEZ] = "OP_JEZ",
     [OP_PRINT] = "OP_PRINT",
 };
 
@@ -82,6 +115,7 @@ typedef struct {
     size_t locals_count;
 } Module;
 
+typedef struct Value Value;
 typedef enum {
     VALUE_NIL = 0,
     VALUE_INT,
@@ -104,10 +138,19 @@ struct Object {
 
 typedef struct {
     Object base;
-    StringBuilder sb;
+    char  *items;
+    size_t count;
+    size_t capacity;
 } ObjectString;
 
 typedef struct {
+    Object base;
+    Value *items;
+    size_t count;
+    size_t capacity;
+} ObjectArray;
+
+typedef struct Value {
     ValueKind kind;
     union {
         int     intv;
@@ -166,6 +209,14 @@ void runtime_setglobal(Runtime *runtime, const char *name, Value value)
 void runtime_mark_object(Runtime *runtime, Object *object)
 {
     object->marked = true;
+    if(object->kind == OBJECT_ARRAY) {
+        ObjectArray *arr = (ObjectArray*)object;
+        for(size_t i = 0; i < arr->count; ++i) {
+            Value val = arr->items[i];
+            if(val.kind == VALUE_OBJ) 
+                runtime_mark_object(runtime, val.objv);
+        }
+    }
 }
 
 void runtime_mark_used_objects(Runtime *runtime)
@@ -190,6 +241,27 @@ void runtime_mark_used_objects(Runtime *runtime)
     }
 }
 
+void runtime_destroy_object(Runtime *runtime, Object *object)
+{
+    switch(object->kind) {
+    case OBJECT_NIL:
+        free(object);
+        break;
+    case OBJECT_STRING:
+        {
+            ObjectString *str = (ObjectString*)object;
+            free(str->items);
+        } break;
+    case OBJECT_ARRAY:
+        {
+            ObjectArray *arr = (ObjectArray*)object;
+            free(arr->items);
+        } break;
+    default:
+        ASSERT(0 && "Unreachable");
+    }
+}
+
 void runtime_sweep_unused_objects(Runtime *runtime)
 {
     for(size_t i = 0; i < runtime->all.count;) {
@@ -198,8 +270,7 @@ void runtime_sweep_unused_objects(Runtime *runtime)
             obj->marked = false;
             ++i;
         } else {
-            // TODO: object_destroy to handle destroying object
-            free(obj);
+            runtime_destroy_object(runtime, obj);
             da_remove_unordered(&runtime->all, i);
         }
     }
@@ -235,13 +306,60 @@ Object *runtime_newobject(Runtime *runtime, ObjectKind kind, size_t size)
 Object *runtime_pushnewstring(Runtime *runtime, const char *init_text)
 {
     ObjectString *obj = (ObjectString*)runtime_newobject(runtime, OBJECT_STRING, sizeof(ObjectString));
-    obj->sb.count    = 0;
-    obj->sb.capacity = 0;
-    obj->sb.items    = 0;
+    obj->count    = 0;
+    obj->capacity = 0;
+    obj->items    = 0;
     if(init_text) 
-        sb_appendf(&obj->sb, "%s", init_text);
+        da_append_many(obj, init_text, cstrsz(init_text));
     sa_append(&runtime->stack, ((Value){ .kind = VALUE_OBJ, .objv = (Object*)obj }));
     return (Object*)obj;
+}
+
+Object *runtime_pushnewarray(Runtime *runtime)
+{
+    ObjectArray *obj = (ObjectArray*)runtime_newobject(runtime, OBJECT_ARRAY, sizeof(ObjectArray));
+    obj->count    = 0;
+    obj->capacity = 0;
+    obj->items    = 0;
+    sa_append(&runtime->stack, ((Value){ .kind = VALUE_OBJ, .objv = (Object*)obj }));
+    return (Object*)obj;
+}
+
+void print_value(Value *values, size_t count)
+{
+    for(size_t i = 0; i < count; ++i) {
+        Value a = values[i];
+        switch(a.kind) {
+            case VALUE_NIL:
+                printf("<nil>\n");
+                break;
+            case VALUE_FLT:
+                printf("%f\n", a.fltv);
+                break;
+            case VALUE_INT:
+                printf("%d\n", a.intv);
+                break;
+            case VALUE_OBJ:
+                {
+                    switch(a.objv->kind) {
+                        case OBJECT_STRING:
+                            {
+                                ObjectString *str = (ObjectString*)a.objv;
+                                printf("%.*s\n", (int)str->count, str->items);
+                            } break;
+                        case OBJECT_ARRAY:
+                            ASSERT(0 && "Not implemented");
+                            break;
+                        default:
+                            ASSERT(0 && "Unreachable");
+                            break;
+                    }
+                } break;
+            default:
+                ASSERT(0 && "Unreachable");
+                break;
+        }
+    }
 }
 
 bool run_module(Module *module, Runtime *runtime)
@@ -268,9 +386,64 @@ bool run_module(Module *module, Runtime *runtime)
                 runtime_pushnewstring(runtime, &module->strconsts.items[inst.arg]);
                 break;
 
+            case OP_STRING_LENGTH:
+                {
+                    Value a = sa_pop(&runtime->stack);
+                    ASSERT(a.kind == VALUE_OBJ);
+                    ASSERT(a.objv->kind == OBJECT_STRING);
+                    ObjectString *str = (ObjectString*)a.objv;
+                    sa_append(&runtime->stack, ((Value){ .kind = VALUE_INT, .intv= str->count }));
+                } break;
+            case OP_STRING_CONCAT:
+                {
+                    Value a = sa_pop(&runtime->stack);
+                    Value b = sa_pop(&runtime->stack);
+                    ASSERT(a.kind == VALUE_OBJ);
+                    ASSERT(a.objv->kind == OBJECT_STRING);
+                    ASSERT(b.kind == VALUE_OBJ);
+                    ASSERT(b.objv->kind == OBJECT_STRING);
+                    ObjectString *str_a = (ObjectString*)a.objv;
+                    ObjectString *str_b = (ObjectString*)b.objv;
+                    da_append_many(str_b, str_a->items, str_a->count);
+                    sb_append_char(str_b, 0);
+                    sa_append(&runtime->stack, b);
+                } break;
+            case OP_STRING_GET:
+                {
+                    Value objv = sa_pop(&runtime->stack);
+                    Value index = sa_pop(&runtime->stack);
+                    ASSERT(objv.kind == VALUE_OBJ);
+                    ASSERT(index.kind == VALUE_INT);
+                    ASSERT(objv.objv->kind == OBJECT_STRING);
+                    ObjectString *str = (ObjectString*)objv.objv;
+                    ASSERT(index.intv < (int)str->count);
+                    sa_append(&runtime->stack, ((Value){ .kind = VALUE_INT, .intv = str->items[index.intv] }));
+                } break;
+            case OP_STRING_SET:
+                {
+                    Value objv  = sa_pop(&runtime->stack);
+                    Value index = sa_pop(&runtime->stack);
+                    Value item  = sa_pop(&runtime->stack);
+                    ASSERT(objv.kind  == VALUE_OBJ);
+                    ASSERT(index.kind == VALUE_INT);
+                    ASSERT(item.kind  == VALUE_INT);
+                    ASSERT(objv.objv->kind == OBJECT_STRING);
+                    ObjectString *str = (ObjectString*)objv.objv;
+                    ASSERT(index.intv < str->count);
+                    str->items[index.intv] = item.intv;
+                } break;
+
             case OP_ADD:
             case OP_MUL:
             case OP_SUB:
+            case OP_EQ:
+            case OP_NE:
+            case OP_GT:
+            case OP_GE:
+            case OP_LT:
+            case OP_LE:
+            case OP_AND:
+            case OP_OR:
                 {
                     Value a = sa_pop(&runtime->stack);
                     Value b = sa_pop(&runtime->stack);
@@ -284,6 +457,30 @@ bool run_module(Module *module, Runtime *runtime)
                         break;
                     case OP_MUL:
                         b.intv *= a.intv;
+                        break;
+                    case OP_EQ:
+                        b.intv  = b.intv == a.intv;
+                        break;
+                    case OP_NE:
+                        b.intv  = b.intv != a.intv;
+                        break;
+                    case OP_GT:
+                        b.intv  = b.intv > a.intv;
+                        break;
+                    case OP_GE:
+                        b.intv  = b.intv >= a.intv;
+                        break;
+                    case OP_LT:
+                        b.intv  = b.intv <  a.intv;
+                        break;
+                    case OP_LE:
+                        b.intv  = b.intv <= a.intv;
+                        break;
+                    case OP_AND:
+                        b.intv  = b.intv && a.intv;
+                        break;
+                    case OP_OR:
+                        b.intv  = b.intv || a.intv;
                         break;
                     default:
                         ASSERT(0 && "Unreachable");
@@ -308,71 +505,43 @@ bool run_module(Module *module, Runtime *runtime)
                 } break;
 
             case OP_JMP:
-                ASSERT(0 && "Not implemented");
-                break;
-            case OP_JNZ:
-                ASSERT(0 && "Not implemented");
-                break;
-            case OP_LABEL:
-                break;
+                {
+                    ASSERT(inst.arg < module->labels.count);
+                    pc = module->labels.items[inst.arg];
+                } break;
+            case OP_JEZ:
+                {
+                    ASSERT(inst.arg < module->labels.count);
+                    size_t new_pc = module->labels.items[inst.arg];
+
+                    Value a = sa_pop(&runtime->stack);
+                    switch(a.kind) {
+                    case VALUE_NIL:
+                        pc = new_pc;
+                        break;
+                    case VALUE_INT:
+                        if(a.intv == 0) pc = new_pc;
+                        break;
+                    default:
+                        ASSERT(0 && "Invalid value kind");
+                        break;
+                    }
+                } break;
             case OP_PRINT:
                 {
                     Value a = sa_pop(&runtime->stack);
-                    switch(a.kind) {
-                        case VALUE_NIL:
-                            printf("<nil>\n");
-                            break;
-                        case VALUE_FLT:
-                            printf("%f\n", a.fltv);
-                            break;
-                        case VALUE_INT:
-                            printf("%d\n", a.intv);
-                            break;
-                        case VALUE_OBJ:
-                            {
-                                switch(a.objv->kind) {
-                                case OBJECT_STRING:
-                                    {
-                                        ObjectString *str = (ObjectString*)a.objv;
-                                        printf("%.*s\n", (int)str->sb.count, str->sb.items);
-                                    } break;
-                                case OBJECT_ARRAY:
-                                    ASSERT(0 && "Not implemented");
-                                    break;
-                                default:
-                                    ASSERT(0 && "Unreachable");
-                                    break;
-                                }
-                            } break;
-                        default:
-                            ASSERT(0 && "Unreachable");
-                            break;
-                    }
+                    print_value(&a, 1);
                 } break;
         }
 
         /*printf("=========================\n");*/
         /*printf("[%zu] %s %d\n", pc, opcode_names[inst.opcode], inst.arg);*/
         /*printf("STACK\n");*/
-        /*for(size_t i = 0; i < stack.count; ++i) {*/
-        /*    Value a = stack.items[i];*/
-        /*    switch(a.kind) {*/
-        /*        case VALUE_NIL:*/
-        /*            printf("[%zu] <nil>\n", i);*/
-        /*            break;*/
-        /*        case VALUE_FLT:*/
-        /*            printf("[%zu] %f\n", i, a.fltv);*/
-        /*            break;*/
-        /*        case VALUE_INT:*/
-        /*            printf("[%zu] %d\n", i, a.intv);*/
-        /*            break;*/
-        /*        case VALUE_STR:*/
-        /*            printf("[%zu] %s\n", i, a.strv);*/
-        /*            break;*/
-        /*        case VALUE_OBJ:*/
-        /*            printf("[%zu] <object>\n", i);*/
-        /*    }*/
+        /*for(size_t i = 0; i < runtime->stack.count; ++i) {*/
+        /*    Value a = runtime->stack.items[i];*/
+        /*    print_value(&a, 1);*/
         /*}*/
+        /*printf("=========================\n");*/
 
     }
     return true;
@@ -472,7 +641,7 @@ bool parse_expr_unary(Parser *parser, Lexer *lex, Module *module)
     return true;
 }
 
-bool parse_expr_binop2(Parser *parser, Lexer *lex, Module *module)
+bool parse_expr_binop1(Parser *parser, Lexer *lex, Module *module)
 {
     if(!parse_expr_unary(parser, lex, module)) return false;
     while(1) {
@@ -493,9 +662,9 @@ bool parse_expr_binop2(Parser *parser, Lexer *lex, Module *module)
     }
 }
 
-bool parse_expr_binop1(Parser *parser, Lexer *lex, Module *module)
+bool parse_expr_binop2(Parser *parser, Lexer *lex, Module *module)
 {
-    if(!parse_expr_binop2(parser, lex, module)) return false;
+    if(!parse_expr_binop1(parser, lex, module)) return false;
     while(1) {
         ParsePoint savedp = lex->parse_point;
         if(!lexer_get_token(lex)) return false;
@@ -512,14 +681,223 @@ bool parse_expr_binop1(Parser *parser, Lexer *lex, Module *module)
                 lex->parse_point = savedp;
                 return true;
         }
+        if(!parse_expr_binop1(parser, lex, module)) return false;
+        sa_append(&module->insts, ((Inst){ .opcode = op, }));
+    }
+}
+
+bool parse_expr_binop3(Parser *parser, Lexer *lex, Module *module)
+{
+    if(!parse_expr_binop2(parser, lex, module)) return false;
+    while(1) {
+        ParsePoint savedp = lex->parse_point;
+        if(!lexer_get_token(lex)) return false;
+        Opcode op = {0};
+        switch(lex->token) {
+            case TOKEN_LESS:
+                op = OP_LT;
+                break;
+            case TOKEN_LESSEQ:
+                op = OP_LE;
+                break;
+            case TOKEN_GREATER:
+                op = OP_GT;
+                break;
+            case TOKEN_GREATEREQ:
+                op = OP_GE;
+                break;
+            default:
+                // Not a binary operation
+                lex->parse_point = savedp;
+                return true;
+        }
         if(!parse_expr_binop2(parser, lex, module)) return false;
+        sa_append(&module->insts, ((Inst){ .opcode = op, }));
+    }
+}
+
+bool parse_expr_binop4(Parser *parser, Lexer *lex, Module *module)
+{
+    if(!parse_expr_binop3(parser, lex, module)) return false;
+    while(1) {
+        ParsePoint savedp = lex->parse_point;
+        if(!lexer_get_token(lex)) return false;
+        Opcode op = {0};
+        switch(lex->token) {
+            case TOKEN_EQEQ:
+                op = OP_EQ;
+                break;
+            case TOKEN_NOTEQ:
+                op = OP_NE;
+                break;
+            default:
+                // Not a binary operation
+                lex->parse_point = savedp;
+                return true;
+        }
+        if(!parse_expr_binop3(parser, lex, module)) return false;
+        sa_append(&module->insts, ((Inst){ .opcode = op, }));
+    }
+}
+
+bool parse_expr_binop5(Parser *parser, Lexer *lex, Module *module)
+{
+    if(!parse_expr_binop4(parser, lex, module)) return false;
+    while(1) {
+        ParsePoint savedp = lex->parse_point;
+        if(!lexer_get_token(lex)) return false;
+        Opcode op = {0};
+        switch(lex->token) {
+            case TOKEN_AND:
+                op = OP_AND;
+                break;
+            default:
+                // Not a binary operation
+                lex->parse_point = savedp;
+                return true;
+        }
+        if(!parse_expr_binop4(parser, lex, module)) return false;
+        sa_append(&module->insts, ((Inst){ .opcode = op, }));
+    }
+}
+
+bool parse_expr_binop6(Parser *parser, Lexer *lex, Module *module)
+{
+    if(!parse_expr_binop4(parser, lex, module)) return false;
+    while(1) {
+        ParsePoint savedp = lex->parse_point;
+        if(!lexer_get_token(lex)) return false;
+        Opcode op = {0};
+        switch(lex->token) {
+            case TOKEN_OR:
+                op = OP_OR;
+                break;
+            default:
+                // Not a binary operation
+                lex->parse_point = savedp;
+                return true;
+        }
+        if(!parse_expr_binop4(parser, lex, module)) return false;
         sa_append(&module->insts, ((Inst){ .opcode = op, }));
     }
 }
 
 bool parse_expr(Parser *parser, Lexer *lex, Module *module)
 {
-    if(!parse_expr_binop1(parser, lex, module)) return false;
+    if(!parse_expr_binop5(parser, lex, module)) return false;
+    return true;
+}
+
+bool parse_block(Parser *parser, Lexer *lex, Module *module);
+bool parse_stmt(Parser *parser, Lexer *lex, Module *module)
+{
+    switch(lex->token) {
+        case TOKEN_VAR:
+            {
+                if(!lexer_get_and_expect_token(lex, TOKEN_ID)) return false;
+                const char *name = arena_strdup(parser->prog_arena, lex->string);
+                if(scope_hasvar(parser, name)) {
+                    lexer_diagf(lexer_loc(lex), 
+                            "error: variable with name `%s` is already exists. Could not re-initialize one",
+                            name);
+                    return false;
+                }
+                size_t local_slot = module->locals_count++;
+                scope_setvar(parser, name, local_slot);
+                if(!lexer_get_and_expect_token(lex, TOKEN_EQ)) return false;
+                if(!parse_expr(parser, lex, module)) return false;
+                sa_append(&module->insts, ((Inst){ .opcode = OP_LOCAL_SET, .arg = local_slot }));
+            } break;
+        case TOKEN_WHILE:
+            {
+                size_t label_start = module->labels.count; // nop is what pointed by label_start
+                sa_append(&module->insts, ((Inst){ .opcode = OP_NOP, }));
+                size_t label_start_pc = module->insts.count - 1;
+                sa_append(&module->labels, label_start_pc);
+
+                size_t label_end = module->labels.count;
+                sa_append(&module->labels, 0);
+
+                if(!lexer_get_and_expect_token(lex, TOKEN_OPAREN)) return false;
+                if(!parse_expr(parser, lex, module)) return false;
+
+                sa_append(&module->insts, ((Inst){ .opcode = OP_JEZ, .arg = label_end }));
+
+                // Check if the top of the stack is true
+
+                if(!lexer_get_and_expect_token(lex, TOKEN_CPAREN)) return false;
+                if(!lexer_get_and_expect_token(lex, TOKEN_OCURLY)) return false;
+
+                scope_begin(parser);
+                while(1) {
+                    ParsePoint savedp = lex->parse_point;
+                    if(!lexer_get_token(lex)) return false;
+                    if(lex->token == TOKEN_CCURLY) {
+                        lex->parse_point = savedp;
+                        break;
+                    }
+                    if(lex->token == TOKEN_BREAK) {
+                        sa_append(&module->insts, ((Inst){ .opcode = OP_JMP, .arg = label_end }));
+                        continue;
+                    } else if(lex->token == TOKEN_CONTINUE) {
+                        sa_append(&module->insts, ((Inst){ .opcode = OP_JMP, .arg = label_start }));
+                        continue;
+                    } else {
+                        if(!parse_stmt(parser, lex, module)) return false;
+                    }
+                    arena_reset(parser->temp_arena);
+                }
+                scope_end(parser);
+
+                if(!lexer_get_and_expect_token(lex, TOKEN_CCURLY)) return false;
+                sa_append(&module->insts, ((Inst){ .opcode = OP_JMP, .arg = label_start }));
+                sa_append(&module->insts, ((Inst){ .opcode = OP_NOP, }));
+
+                size_t label_end_pc = module->insts.count - 1;
+                module->labels.items[label_end] = label_end_pc;
+            } break;
+        case TOKEN_IF:
+            {
+            } break;
+        case TOKEN_ID:
+            {
+                const char *name = arena_strdup(parser->prog_arena, lex->string);
+                if(!lexer_get_and_expect_token(lex, TOKEN_EQ)) return false;
+                if(!scope_hasvar(parser, name)) {
+                    lexer_diagf(lexer_loc(lex), 
+                            "error: variable with name `%s` is not exists",
+                            name);
+                    return false;
+                }
+                size_t local_slot = scope_getvar(parser, name);
+                if(!parse_expr(parser, lex, module)) return false;
+                sa_append(&module->insts, ((Inst){ .opcode = OP_LOCAL_SET, .arg = local_slot }));
+            } break;
+        case TOKEN_PRINT:
+            if(!parse_expr(parser, lex, module)) return false;
+            sa_append(&module->insts, ((Inst){ .opcode = OP_PRINT }));
+            break;
+        default:
+            fprintf(stderr, "invalid token %s\n", lexer_display_token(lex->token));
+            break;
+    }
+    return true;
+}
+
+bool parse_block(Parser *parser, Lexer *lex, Module *module)
+{
+    scope_begin(parser);
+    while(1) {
+        ParsePoint savedp = lex->parse_point;
+        if(!lexer_get_token(lex)) return false;
+        if(lex->token == TOKEN_CCURLY) {
+            lex->parse_point = savedp;
+            break;
+        }
+        if(!parse_stmt(parser, lex, module)) return false;
+        arena_reset(parser->temp_arena);
+    }
+    scope_end(parser);
     return true;
 }
 
@@ -527,32 +905,10 @@ bool parse_program(Parser *parser, Lexer *lex, Module *module)
 {
     scope_begin(parser);
     while(1) {
+        ParsePoint savedp = lex->parse_point;
         if(!lexer_get_token(lex)) return false;
         if(lex->token == TOKEN_EOF) break;
-        switch(lex->token) {
-            case TOKEN_VAR:
-                {
-                    if(!lexer_get_and_expect_token(lex, TOKEN_ID)) return false;
-                    const char *name = arena_strdup(parser->temp_arena, lex->string);
-                    if(scope_hasvar(parser, name)) {
-                        lexer_diagf(lexer_loc(lex), 
-                                "error: variable with name `%s` is already exists. Could not re-initialize one",
-                                name);
-                        return false;
-                    }
-                    size_t local_slot = module->locals_count++;
-                    scope_setvar(parser, name, local_slot);
-                    if(!lexer_get_and_expect_token(lex, TOKEN_EQ)) return false;
-                    if(!parse_expr(parser, lex, module)) return false;
-                    sa_append(&module->insts, ((Inst){ .opcode = OP_LOCAL_SET }));
-                } break;
-            case TOKEN_PRINT:
-                if(!parse_expr(parser, lex, module)) return false;
-                sa_append(&module->insts, ((Inst){ .opcode = OP_PRINT }));
-                break;
-            default:
-                break;
-        }
+        if(!parse_stmt(parser, lex, module)) return false;
         arena_reset(parser->temp_arena);
     }
     scope_end(parser);

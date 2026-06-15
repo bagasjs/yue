@@ -104,6 +104,11 @@ void lexer_diagf(Loc loc, const char *fmt, ...);
 
 #define KEYWORD_TOKEN_LIST      \
     X(VAR       , "var"         ) \
+    X(IF        , "if"          ) \
+    X(ELSE      , "else"        ) \
+    X(WHILE     , "while"       ) \
+    X(BREAK     , "break"       ) \
+    X(CONTINUE  , "continue"    ) \
     X(PRINT     , "print"       ) \
 
 typedef enum {
