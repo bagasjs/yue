@@ -21,19 +21,6 @@ typedef enum Op {
     OP_AND,
     OP_OR,
 
-    OP_STRING_CONCAT,
-    OP_STRING_LENGTH,
-    OP_STRING_GET,
-    OP_STRING_SET,
-
-    /*OP_ARRAY_NEW,*/
-    /*OP_ARRAY_POP,*/
-    /*OP_ARRAY_APPEND,*/
-    /*OP_ARRAY_INSERT,*/
-    /*OP_ARRAY_REMOVE,*/
-    /*OP_ARRAY_LENGTH,*/
-    /*OP_ARRAY_CONCAT,*/
-
     OP_LOCAL_SET,
     OP_LOCAL_GET,
     OP_GLOBAL_GET,
@@ -41,6 +28,9 @@ typedef enum Op {
     OP_JMP,
     OP_JEZ,
     OP_PRINT,
+
+    OP_CALL,
+    OP_RET,
 } Opcode;
 
 const char *opcode_names[] = {
@@ -61,11 +51,6 @@ const char *opcode_names[] = {
     [OP_AND] = "OP_AND",
     [OP_OR] = "OP_OR",
 
-    [OP_STRING_CONCAT] = "OP_STRING_CONCAT",
-    [OP_STRING_LENGTH] = "OP_STRING_LENGTH",
-    [OP_STRING_GET] = "OP_STRING_GET",
-    [OP_STRING_SET] = "OP_STRING_SET",
-
     [OP_LOCAL_SET] = "OP_LOCAL_SET",
     [OP_LOCAL_GET] = "OP_LOCAL_GET",
     [OP_GLOBAL_GET] = "OP_GLOBAL_GET",
@@ -73,6 +58,8 @@ const char *opcode_names[] = {
     [OP_JMP] = "OP_JMP",
     [OP_JEZ] = "OP_JEZ",
     [OP_PRINT] = "OP_PRINT",
+    [OP_CALL] = "OP_CALL",
+    [OP_RET] = "OP_RET",
 };
 
 typedef struct {
@@ -395,53 +382,6 @@ bool run_module(Module *module, Runtime *runtime)
                 runtime_pushnewstring(runtime, &module->strconsts.items[inst.arg]);
                 break;
 
-            case OP_STRING_LENGTH:
-                {
-                    Value a = sa_pop(&runtime->stack);
-                    ASSERT(a.kind == VALUE_OBJ);
-                    ASSERT(a.objv->kind == OBJECT_STRING);
-                    ObjectString *str = (ObjectString*)a.objv;
-                    sa_append(&runtime->stack, ((Value){ .kind = VALUE_INT, .intv= str->count }));
-                } break;
-            case OP_STRING_CONCAT:
-                {
-                    Value a = sa_pop(&runtime->stack);
-                    Value b = sa_pop(&runtime->stack);
-                    ASSERT(a.kind == VALUE_OBJ);
-                    ASSERT(a.objv->kind == OBJECT_STRING);
-                    ASSERT(b.kind == VALUE_OBJ);
-                    ASSERT(b.objv->kind == OBJECT_STRING);
-                    ObjectString *str_a = (ObjectString*)a.objv;
-                    ObjectString *str_b = (ObjectString*)b.objv;
-                    da_append_many(str_b, str_a->items, str_a->count);
-                    sb_append_char(str_b, 0);
-                    sa_append(&runtime->stack, b);
-                } break;
-            case OP_STRING_GET:
-                {
-                    Value objv = sa_pop(&runtime->stack);
-                    Value index = sa_pop(&runtime->stack);
-                    ASSERT(objv.kind == VALUE_OBJ);
-                    ASSERT(index.kind == VALUE_INT);
-                    ASSERT(objv.objv->kind == OBJECT_STRING);
-                    ObjectString *str = (ObjectString*)objv.objv;
-                    ASSERT(index.intv < (int)str->count);
-                    sa_append(&runtime->stack, ((Value){ .kind = VALUE_INT, .intv = str->items[index.intv] }));
-                } break;
-            case OP_STRING_SET:
-                {
-                    Value objv  = sa_pop(&runtime->stack);
-                    Value index = sa_pop(&runtime->stack);
-                    Value item  = sa_pop(&runtime->stack);
-                    ASSERT(objv.kind  == VALUE_OBJ);
-                    ASSERT(index.kind == VALUE_INT);
-                    ASSERT(item.kind  == VALUE_INT);
-                    ASSERT(objv.objv->kind == OBJECT_STRING);
-                    ObjectString *str = (ObjectString*)objv.objv;
-                    ASSERT(index.intv < (int)str->count);
-                    str->items[index.intv] = item.intv;
-                } break;
-
             case OP_ADD:
             case OP_MUL:
             case OP_SUB:
@@ -613,6 +553,7 @@ void scope_setvar(Parser *parser, const char *name, int slot)
     shtable_set(&parser->scopes.items[parser->scopes.count - 1], name, (void*)(intptr_t)slot);
 }
 
+bool parse_expr(Parser *parser, Lexer *lex, Module *module);
 bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module)
 {
     if(!lexer_get_token(lex)) return false;
@@ -659,6 +600,19 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module)
 bool parse_expr_postfix(Parser *parser, Lexer *lex, Module *module)
 {
     if(!parse_expr_primary(parser, lex, module)) return false;
+
+    ParsePoint savedp = lex->parse_point;
+    if(!lexer_get_token(lex)) return false;
+    switch(lex->token) {
+    case TOKEN_OPAREN:
+        {
+
+        } break;
+    default:
+        lex->parse_point = savedp;
+        break;
+    }
+
     return true;
 }
 

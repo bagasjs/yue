@@ -11,7 +11,7 @@ print ("9.  Frying Pan")
 print ("10. Pot")
 print ("11. Oven")
 print ("12. Mixer")
-print ("13. Steamer"0
+print ("13. Steamer")
 
 var choice = 2;
 print ("Choice :", choice)
@@ -39,7 +39,7 @@ if(choice == 1) {
 } else if(choice == 11) {
     print ("It takes some getting used to, but some foods just can't be made without an oven")
 } else if(choice == 12) {
-    print ("Mixers are nice to have... You've got to have one of these"
+    print ("Mixers are nice to have... You've got to have one of these")
 } else if(choice == 13) {
     print ("If you can cook using a steamer then your cooking is nearly pro!")
 } else {
