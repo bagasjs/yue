@@ -128,6 +128,14 @@ size_t cstrsz(const char *cstr); // size includes the zero termination
         (da)->items[(index)] = (da)->items[--(da)->count]; \
     } while(0)
 
+#define da_pop(da)          \
+(                           \
+ASSERT((da)),               \
+ASSERT((da)->items),        \
+ASSERT((da)->count >= 1),   \
+(da)->items[--(da)->count]  \
+)                           \
+
 
 #define ARRLEN(xs) (sizeof(xs)/sizeof(*xs))
 

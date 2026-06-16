@@ -1,0 +1,7 @@
+func add(a, b) {
+    var c = a + b;
+    print(a, "+", b, "=", c)
+    return a + b;
+}
+
+// add(1, 2)
