@@ -27,6 +27,12 @@
 #define DA_INIT_CAP 256
 #endif
 
+void *bufcpy(void *dst, const void *src, size_t n);
+void *bufset(void *dst, const int value, size_t n);
+bool  cstreq(const char *a, const char *b);
+size_t cstrlen(const char *cstr); // doesn't include the zero termination
+size_t cstrsz(const char *cstr); // size includes the zero termination
+
 typedef struct ArenaRegion ArenaRegion;
 typedef struct Arena {
     ArenaRegion *begin;
@@ -41,31 +47,34 @@ char *arena_strdup(Arena *a, const char *cstr);
 char *arena_sprintf(Arena *a, const char *fmt, ...);
 size_t arena_get_usage(Arena *a);
 
-#define arena_da_reserve(arena, da, required_cap)                               \
-    do {                                                                        \
-        size_t item_size = sizeof(*(da)->items);                                \
-        if(required_cap > (da)->capacity) {                                     \
-            if((da)->capacity == 0) (da)->capacity = DA_INIT_CAP;               \
-            while((da)->capacity < required_cap)                                \
-                (da)->capacity *= 2;                                            \
-            void *items = arena_alloc((arena), (da)->capacity * item_size);     \
-            ASSERT(items != NULL && "Buy More RAM LOL!");                       \
-            if((da)->items) memcpy(items, (da)->items, (da)->count*item_size);  \
-            (da)->items = items;                                                \
-        }                                                                       \
-    } while(0)
+#define arena_da_reserve(arena, da, required_cap)                           \
+do {                                                                        \
+    size_t item_size = sizeof(*(da)->items);                                \
+    if(required_cap > (da)->capacity) {                                     \
+        if((da)->capacity == 0) (da)->capacity = DA_INIT_CAP;               \
+        while((da)->capacity < required_cap)                                \
+            (da)->capacity *= 2;                                            \
+        void *items = arena_alloc((arena), (da)->capacity * item_size);     \
+        ASSERT(items != NULL && "Buy More RAM LOL!");                       \
+        if((da)->items) bufcpy(items, (da)->items, (da)->count*item_size);  \
+        (da)->items = items;                                                \
+    }                                                                       \
+} while(0)
 
-#define arena_da_append(arena, da, item)                            \
-    do {                                                            \
-        arena_da_reserve((arena), (da), (da)->count + 1);           \
-        (da)->items[(da)->count++] = (item);                        \
-    } while(0)
+#define arena_da_append(arena, da, item)                \
+do {                                                    \
+    arena_da_reserve((arena), (da), (da)->count + 1);   \
+    (da)->items[(da)->count++] = (item);                \
+} while(0)
 
-void *bufcpy(void *dst, const void *src, size_t n);
-void *bufset(void *dst, const int value, size_t n);
-bool  cstreq(const char *a, const char *b);
-size_t cstrlen(const char *cstr); // doesn't include the zero termination
-size_t cstrsz(const char *cstr); // size includes the zero termination
+#define arena_da_append_many(arena, da, new_items, new_items_count) \
+do {                                                                \
+    size_t item_size = sizeof(*(da)->items);                        \
+    arena_da_reserve((arena), (da), (da)->count + new_items_count); \
+    bufcpy((da)->items + (da)->count, (new_items),                  \
+        (new_items_count)*item_size);                               \
+    (da)->count += (new_items_count);                               \
+} while(0)
 
 // NOTE: Remove everything below
 //       We should operate dynamic array also inside an arena

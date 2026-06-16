@@ -111,6 +111,7 @@ void lexer_diagf(Loc loc, const char *fmt, ...);
     X(BREAK     , "break"       ) \
     X(CONTINUE  , "continue"    ) \
     X(FUNC      , "func"        ) \
+    X(RETURN    , "return"      ) \
     X(PRINT     , "print"       ) \
 
 typedef enum {
