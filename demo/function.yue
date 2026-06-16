@@ -1,5 +1,5 @@
 var d = 351;
-func add(a, b) {
+fun add(a, b) {
     var c = a + b;
     print(a, "+", b, "=", c)
     return c;

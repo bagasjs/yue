@@ -897,7 +897,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                 if(!parse_expr(parser, lex, module, func)) return false;
                 add_inst_to_function(func, ((Inst){ .opcode = OP_RET }), module);
             } break;
-        case TOKEN_FUNC:
+        case TOKEN_FUN:
             {
                 if(!lexer_get_and_expect_token(lex, TOKEN_ID)) return false;
                 int new_func_id = add_new_function_to_module(module, lex->string);

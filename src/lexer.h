@@ -110,7 +110,7 @@ void lexer_diagf(Loc loc, const char *fmt, ...);
     X(WHILE     , "while"       ) \
     X(BREAK     , "break"       ) \
     X(CONTINUE  , "continue"    ) \
-    X(FUNC      , "func"        ) \
+    X(FUN       , "fun"         ) \
     X(RETURN    , "return"      ) \
     X(PRINT     , "print"       ) \
 

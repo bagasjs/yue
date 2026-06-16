@@ -1,6 +1,15 @@
 # Yue
 A small scripting language
 
+## Features
+1. Small 
+1. Simple FFI API with C (no stack wrangling)
+1. Garbage Collected
+1. Slow but small
+1. Lack of Closure but small
+1. No Object Oriented Programming but again it's small
+1. Cute and Funny
+
 ## Example
 1. Hello World
 ```yue
