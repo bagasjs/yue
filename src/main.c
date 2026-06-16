@@ -656,9 +656,15 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module)
     return true;
 }
 
-bool parse_expr_unary(Parser *parser, Lexer *lex, Module *module)
+bool parse_expr_postfix(Parser *parser, Lexer *lex, Module *module)
 {
     if(!parse_expr_primary(parser, lex, module)) return false;
+    return true;
+}
+
+bool parse_expr_unary(Parser *parser, Lexer *lex, Module *module)
+{
+    if(!parse_expr_postfix(parser, lex, module)) return false;
     return true;
 }
 
@@ -942,6 +948,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module)
             } break;
         case TOKEN_PRINT:
             {
+                if(!lexer_get_and_expect_token(lex, TOKEN_OPAREN)) return false;
                 size_t n = 1;
                 while(true) {
                     if(!parse_expr(parser, lex, module)) return false;
@@ -954,6 +961,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module)
                     }
                     n += 1;
                 }
+                if(!lexer_get_and_expect_token(lex, TOKEN_CPAREN)) return false;
             } break;
         case TOKEN_SEMICOLON:
             break;
