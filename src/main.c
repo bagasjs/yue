@@ -26,11 +26,6 @@ typedef enum Op {
     OP_LOCAL_GET,
     OP_GLOBAL_GET,
 
-    // NOTE: do not use rax anywhere. RAX is only use to call function.
-    //       Thank you
-    OP_PUSH_RAX,
-    OP_POP_RAX,
-
     OP_JMP,
     OP_JEZ,
     OP_PRINT,
@@ -61,9 +56,6 @@ const char *opcode_names[] = {
     [OP_LOCAL_SET] = "OP_LOCAL_SET",
     [OP_LOCAL_GET] = "OP_LOCAL_GET",
     [OP_GLOBAL_GET] = "OP_GLOBAL_GET",
-
-    [OP_PUSH_RAX] = "OP_PUSH_RAX",
-    [OP_POP_RAX] = "OP_POP_RAX",
 
     [OP_JMP] = "OP_JMP",
     [OP_JEZ] = "OP_JEZ",
@@ -411,8 +403,8 @@ void print_value(Value *values, size_t count)
 bool run_function(Runtime *runtime, Module *module, Function *func, Value *args, size_t argc, Value *retval)
 {
     size_t pc = 0;
-    int printed_n_times = 0;
-    const int N_CYCLES_TO_RUN = 0;
+    int print_iter = 0;
+    const int PRINT_CAP = 0;
 
     size_t frame_ptr = runtime->call_frames.count;
     sa_append(&runtime->call_frames, ((CallFrame){0}));
@@ -444,14 +436,17 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Value *args,
                 break;
             case OP_CALL:
                 {
-                    Value newfuncv = frame->stack[--frame->sp];
+                    ASSERT(frame->sp >= (argc + 1));
+                    size_t argc = inst.arg;
+                    Value newfuncv = frame->stack[frame->sp - argc - 1];
                     ASSERT(newfuncv.kind == VALUE_FUNC);
                     Function *newfunc = &module->functions.items[newfuncv.func_id];
-                    ASSERT(newfunc->params_count <= frame->sp);
-                    Value *args  = &frame->stack[frame->sp - newfunc->params_count];
+                    ASSERT(argc >= newfunc->params_count);
+                    argc = newfunc->params_count; // we only pass the neccessary
+                    Value *args  = &frame->stack[frame->sp - argc];
                     Value retval = {0};
-                    if(!run_function(runtime, module, newfunc, args, newfunc->params_count, &retval)) return false;
-                    frame->sp-= newfunc->params_count;
+                    if(!run_function(runtime, module, newfunc, args, argc, &retval)) return false;
+                    frame->sp -= argc + 1;
                     frame->stack[frame->sp++] = retval;
                 } break;
             case OP_RET:
@@ -517,13 +512,6 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Value *args,
                     frame->stack[frame->sp++] = b;
                 } break;
 
-            case OP_PUSH_RAX:
-                frame->stack[frame->sp++] = frame->rax;
-                break;
-            case OP_POP_RAX:
-                frame->rax = frame->stack[--frame->sp];
-                break;
-
             case OP_LOCAL_SET:
                 frame->locals[inst.arg] = frame->stack[--frame->sp];
                 break;
@@ -571,11 +559,11 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Value *args,
                 } break;
         }
 
-        if(printed_n_times < N_CYCLES_TO_RUN) {
-            printed_n_times += 1;
+        if(print_iter < PRINT_CAP) {
+            print_iter += 1;
             printf("=========================\n");
             printf("[%zu] %s %d\n", pc, opcode_names[inst.opcode], inst.arg);
-            printf("STACK [sp=%zu]\n", frame->sp);
+            printf("STACK [callframe=%zu, sp=%zu]\n", frame_ptr, frame->sp);
             for(size_t i = 0; i < frame->sp; ++i) {
                 Value a = frame->stack[i];
                 print_value(&a, 1);
@@ -727,15 +715,15 @@ bool parse_expr_postfix(Parser *parser, Lexer *lex, Module *module, Function *fu
     switch(lex->token) {
     case TOKEN_OPAREN:
         {
-            add_inst_to_function(func, (Inst){ .opcode = OP_POP_RAX }, module);
+            size_t argc = 0;
             while(1) {
                 if(!parse_expr(parser, lex, module, func)) return false;
+                argc += 1;
                 if(!lexer_get_token(lex)) return false;
                 if(lex->token == TOKEN_CPAREN) break;
                 if(!lexer_expect_token(lex, TOKEN_COMMA)) return false;
             }
-            add_inst_to_function(func, (Inst){ .opcode = OP_PUSH_RAX }, module);
-            add_inst_to_function(func, (Inst){ .opcode = OP_CALL }, module);
+            add_inst_to_function(func, (Inst){ .opcode = OP_CALL, .arg = argc }, module);
         } break;
     default:
         lex->parse_point = savedp;
@@ -913,9 +901,10 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
             {
                 if(!lexer_get_and_expect_token(lex, TOKEN_ID)) return false;
                 int new_func_id = add_new_function_to_module(module, lex->string);
+
                 scope_begin(parser, true);
-                if(!lexer_get_and_expect_token(lex, TOKEN_OPAREN)) return false;
                 Function *newfunc = &module->functions.items[new_func_id];
+                if(!lexer_get_and_expect_token(lex, TOKEN_OPAREN)) return false;
                 while(1) {
                     ParsePoint savedp = lex->parse_point;
                     if(!lexer_get_token(lex)) return false;
@@ -941,6 +930,20 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                     }
                 }
                 if(!lexer_get_and_expect_token(lex, TOKEN_CPAREN)) return false;
+
+                { // add a local for the function itself
+                    Function *newfunc = &module->functions.items[new_func_id];
+                    size_t local_slot = newfunc->locals_count++;
+                    // TODO: We use function name here for the table.
+                    //       In the future we might want to use an index
+                    //       to the string constants in Module for function
+                    //       name consider using Parser's prog_arena for
+                    //       name that's in the scope's name table
+                    scope_setvar(parser, newfunc->name, local_slot);
+                    add_inst_to_function(newfunc, ((Inst){ .opcode = OP_PUSH_FUNC, .arg = new_func_id, }), module);
+                    add_inst_to_function(newfunc, ((Inst){ .opcode = OP_LOCAL_SET, .arg = local_slot, }), module);
+                }
+
                 if(!lexer_get_and_expect_token(lex, TOKEN_OCURLY)) return false;
                 while(1) {
                     ParsePoint savedp = lex->parse_point;
@@ -954,15 +957,18 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                 }
                 scope_end(parser, true);
 
-                size_t local_slot = func->locals_count++;
-                // TODO: We use function name here for the table.
-                //       In the future we might want to use an index
-                //       to the string constants in Module for function
-                //       name consider using Parser's prog_arena for
-                //       name that's in the scope's name table
-                scope_setvar(parser, newfunc->name, local_slot);
-                add_inst_to_function(func, ((Inst){ .opcode = OP_PUSH_FUNC, .arg = new_func_id, }), module);
-                add_inst_to_function(func, ((Inst){ .opcode = OP_LOCAL_SET, .arg = local_slot, }), module);
+                {
+                    Function *newfunc = &module->functions.items[new_func_id];
+                    size_t local_slot = func->locals_count++;
+                    // TODO: We use function name here for the table.
+                    //       In the future we might want to use an index
+                    //       to the string constants in Module for function
+                    //       name consider using Parser's prog_arena for
+                    //       name that's in the scope's name table
+                    scope_setvar(parser, newfunc->name, local_slot);
+                    add_inst_to_function(func, ((Inst){ .opcode = OP_PUSH_FUNC, .arg = new_func_id, }), module);
+                    add_inst_to_function(func, ((Inst){ .opcode = OP_LOCAL_SET, .arg = local_slot, }), module);
+                }
             } break;
         case TOKEN_VAR:
             {

@@ -1,8 +1,8 @@
-var d = 10;
+var d = 351;
 func add(a, b) {
     var c = a + b;
     print(a, "+", b, "=", c)
     return c;
 }
 
-print("retval =", add(1, 2))
+print("retval =", add(add(34, 35), d))
