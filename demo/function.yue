@@ -5,4 +5,4 @@ func add(a, b) {
     return c;
 }
 
-// add(1, 2)
+print("retval =", add(1, 2))

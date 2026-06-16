@@ -8,6 +8,7 @@ typedef enum Op {
     OP_PUSH_INT,
     OP_PUSH_FLT,
     OP_PUSH_STR,
+    OP_PUSH_FUNC,
 
     OP_ADD,
     OP_SUB,
@@ -25,6 +26,11 @@ typedef enum Op {
     OP_LOCAL_GET,
     OP_GLOBAL_GET,
 
+    // NOTE: do not use rax anywhere. RAX is only use to call function.
+    //       Thank you
+    OP_PUSH_RAX,
+    OP_POP_RAX,
+
     OP_JMP,
     OP_JEZ,
     OP_PRINT,
@@ -38,6 +44,7 @@ const char *opcode_names[] = {
     [OP_PUSH_INT] = "OP_PUSH_INT",
     [OP_PUSH_FLT] = "OP_PUSH_FLT",
     [OP_PUSH_STR] = "OP_PUSH_STR",
+    [OP_PUSH_FUNC] = "OP_PUSH_FUNC",
 
     [OP_ADD] = "OP_ADD",
     [OP_SUB] = "OP_SUB",
@@ -54,6 +61,9 @@ const char *opcode_names[] = {
     [OP_LOCAL_SET] = "OP_LOCAL_SET",
     [OP_LOCAL_GET] = "OP_LOCAL_GET",
     [OP_GLOBAL_GET] = "OP_GLOBAL_GET",
+
+    [OP_PUSH_RAX] = "OP_PUSH_RAX",
+    [OP_POP_RAX] = "OP_POP_RAX",
 
     [OP_JMP] = "OP_JMP",
     [OP_JEZ] = "OP_JEZ",
@@ -108,17 +118,27 @@ typedef struct {
     } functions;
 } Module;
 
-Function *add_new_function_to_module(Module *module, const char *name)
+int add_new_function_to_module(Module *module, const char *name)
 {
     arena_da_append(&module->arena, &module->functions, ((Function){0}));
     Function *result = &module->functions.items[module->functions.count - 1];
     result->name = arena_strdup(&module->arena, name);
-    return result;
+    return module->functions.count - 1;
 }
 
 void add_inst_to_function(Function *function, Inst inst, Module *module)
 {
     arena_da_append(&module->arena, &function->insts, inst);
+}
+
+int find_function_in_module(const char *name, Module *module)
+{
+    for(size_t i = 0; i < module->functions.count; ++i) {
+        if(cstreq(name, module->functions.items[i].name)) {
+            return (int)i;
+        }
+    }
+    return -1;
 }
 
 typedef struct Value Value;
@@ -167,14 +187,13 @@ typedef struct Value {
     };
 } Value;
 
-typedef struct Stack {
-    Value *items;
-    size_t count;
-    size_t capacity;
-} Stack;
-
+#define STACK_CAP 1024
 typedef struct CallFrame {
-    Value locals[1024];
+    Value  locals[1024];
+    Value  stack[STACK_CAP];
+    size_t sp;
+
+    Value  rax; // regista
 } CallFrame;
 
 typedef struct Runtime {
@@ -191,7 +210,6 @@ typedef struct Runtime {
         size_t  capacity;
     } all;
 
-    Stack stack;
     struct {
         CallFrame *items;
         size_t count;
@@ -249,16 +267,15 @@ void runtime_mark_used_objects(Runtime *runtime)
     for(size_t i = 0; i < runtime->call_frames.count; ++i) {
         CallFrame *frame = &runtime->call_frames.items[i];
         for(size_t j = 0; j < ARRLEN(frame->locals); ++j) {
-            Value val = frame->locals[i];
+            Value val = frame->locals[j];
             if(val.kind == VALUE_OBJ) runtime_mark_object(runtime, val.objv);
         }
-    }
-
-    // Mark objects in stack
-    for(size_t i = 0; i < runtime->stack.count; ++i) {
-        Value val = runtime->stack.items[i];
-        if(val.kind == VALUE_OBJ) 
-            runtime_mark_object(runtime, val.objv);
+        // Mark objects in stack
+        for(size_t j = 0; j < STACK_CAP; ++j) {
+            Value val = frame->stack[j];
+            if(val.kind == VALUE_OBJ) 
+                runtime_mark_object(runtime, val.objv);
+        }
     }
 }
 
@@ -327,7 +344,7 @@ Object *runtime_newobject(Runtime *runtime, ObjectKind kind, size_t size)
     return obj;
 }
 
-Object *runtime_pushnewstring(Runtime *runtime, const char *init_text)
+Object *runtime_pushnewstring(Runtime *runtime, CallFrame *frame, const char *init_text)
 {
     ObjectString *obj = (ObjectString*)runtime_newobject(runtime, OBJECT_STRING, sizeof(ObjectString));
     obj->count    = 0;
@@ -335,17 +352,17 @@ Object *runtime_pushnewstring(Runtime *runtime, const char *init_text)
     obj->items    = 0;
     if(init_text) 
         da_append_many(obj, init_text, cstrsz(init_text));
-    sa_append(&runtime->stack, ((Value){ .kind = VALUE_OBJ, .objv = (Object*)obj }));
+    frame->stack[frame->sp++] = ((Value){ .kind = VALUE_OBJ, .objv = (Object*)obj });
     return (Object*)obj;
 }
 
-Object *runtime_pushnewarray(Runtime *runtime)
+Object *runtime_pushnewarray(Runtime *runtime, CallFrame *frame)
 {
     ObjectArray *obj = (ObjectArray*)runtime_newobject(runtime, OBJECT_ARRAY, sizeof(ObjectArray));
     obj->count    = 0;
     obj->capacity = 0;
     obj->items    = 0;
-    sa_append(&runtime->stack, ((Value){ .kind = VALUE_OBJ, .objv = (Object*)obj }));
+    frame->stack[frame->sp++] = ((Value){ .kind = VALUE_OBJ, .objv = (Object*)obj });
     return (Object*)obj;
 }
 
@@ -363,6 +380,9 @@ void print_value(Value *values, size_t count)
                 break;
             case VALUE_INT:
                 printf("%d", a.intv);
+                break;
+            case VALUE_FUNC:
+                printf("<func#%d>", a.func_id);
                 break;
             case VALUE_OBJ:
                 {
@@ -388,31 +408,58 @@ void print_value(Value *values, size_t count)
     printf("\n");
 }
 
-bool run_function(Runtime *runtime, Module *module, Function *func)
+bool run_function(Runtime *runtime, Module *module, Function *func, Value *args, size_t argc, Value *retval)
 {
     size_t pc = 0;
-    int print_n_cycles  = 0;
     int printed_n_times = 0;
+    const int N_CYCLES_TO_RUN = 0;
 
     size_t frame_ptr = runtime->call_frames.count;
     sa_append(&runtime->call_frames, ((CallFrame){0}));
     CallFrame *frame = &runtime->call_frames.items[frame_ptr];
 
-    while(1) {
+    ASSERT(argc == func->params_count);
+    for(size_t i = 0; i < argc; ++i) {
+        frame->locals[i] = args[i];
+    }
+
+    bool running = true;
+    while(running) {
         if(pc >= func->insts.count) break;
         Inst inst = func->insts.items[pc++];
         switch(inst.opcode) {
             case OP_NOP:
                 break;
             case OP_PUSH_INT:
-                sa_append(&runtime->stack, ((Value){ .kind = VALUE_INT, .intv = module->intconsts.items[inst.arg] }));
+                frame->stack[frame->sp++] = ((Value){ .kind = VALUE_INT, .intv = module->intconsts.items[inst.arg] });
                 break;
             case OP_PUSH_FLT:
-                sa_append(&runtime->stack, ((Value){ .kind = VALUE_FLT, .fltv = module->fltconsts.items[inst.arg] }));
+                frame->stack[frame->sp++] = ((Value){ .kind = VALUE_FLT, .fltv = module->fltconsts.items[inst.arg] });
                 break;
             case OP_PUSH_STR:
-                runtime_pushnewstring(runtime, &module->strconsts.items[inst.arg]);
+                runtime_pushnewstring(runtime, frame, &module->strconsts.items[inst.arg]);
                 break;
+            case OP_PUSH_FUNC:
+                frame->stack[frame->sp++] = ((Value){ .kind = VALUE_FUNC, .func_id = inst.arg });
+                break;
+            case OP_CALL:
+                {
+                    Value newfuncv = frame->stack[--frame->sp];
+                    ASSERT(newfuncv.kind == VALUE_FUNC);
+                    Function *newfunc = &module->functions.items[newfuncv.func_id];
+                    ASSERT(newfunc->params_count <= frame->sp);
+                    Value *args  = &frame->stack[frame->sp - newfunc->params_count];
+                    Value retval = {0};
+                    if(!run_function(runtime, module, newfunc, args, newfunc->params_count, &retval)) return false;
+                    frame->sp-= newfunc->params_count;
+                    frame->stack[frame->sp++] = retval;
+                } break;
+            case OP_RET:
+                {
+                    Value a = frame->stack[--frame->sp];
+                    *retval = a;
+                    running = false;
+                } break;
 
             case OP_ADD:
             case OP_MUL:
@@ -426,8 +473,8 @@ bool run_function(Runtime *runtime, Module *module, Function *func)
             case OP_AND:
             case OP_OR:
                 {
-                    Value a = sa_pop(&runtime->stack);
-                    Value b = sa_pop(&runtime->stack);
+                    Value a = frame->stack[--frame->sp];
+                    Value b = frame->stack[--frame->sp];
                     ASSERT(a.kind == b.kind && a.kind == VALUE_INT);
                     switch(inst.opcode) {
                     case OP_ADD:
@@ -467,22 +514,26 @@ bool run_function(Runtime *runtime, Module *module, Function *func)
                         ASSERT(0 && "Unreachable");
                         break;
                     }
-                    sa_append(&runtime->stack, b); 
+                    frame->stack[frame->sp++] = b;
                 } break;
 
+            case OP_PUSH_RAX:
+                frame->stack[frame->sp++] = frame->rax;
+                break;
+            case OP_POP_RAX:
+                frame->rax = frame->stack[--frame->sp];
+                break;
+
             case OP_LOCAL_SET:
-                {
-                    Value a = sa_pop(&runtime->stack);
-                    frame->locals[inst.arg] = a;
-                } break;
+                frame->locals[inst.arg] = frame->stack[--frame->sp];
+                break;
             case OP_LOCAL_GET:
-                {
-                    sa_append(&runtime->stack, frame->locals[inst.arg]);
-                } break;
+                frame->stack[frame->sp++] = frame->locals[inst.arg]; 
+                break;
             case OP_GLOBAL_GET:
                 {
                     Value value = runtime->globals.items[inst.arg];
-                    sa_append(&runtime->stack, value);
+                    frame->stack[frame->sp++] = value;
                 } break;
 
             case OP_JMP:
@@ -495,7 +546,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func)
                     ASSERT(inst.arg < (int)func->labels.count);
                     size_t new_pc = func->labels.items[inst.arg];
 
-                    Value a = sa_pop(&runtime->stack);
+                    Value a = frame->stack[--frame->sp];
                     switch(a.kind) {
                     case VALUE_NIL:
                         pc = new_pc;
@@ -510,25 +561,27 @@ bool run_function(Runtime *runtime, Module *module, Function *func)
                 } break;
             case OP_PRINT:
                 {
-                    ASSERT(inst.arg <= (int)runtime->stack.count);
-                    Value *start = &runtime->stack.items[runtime->stack.count - inst.arg];
-                    runtime->stack.count -= inst.arg;
+                    if(inst.arg > (int)frame->sp) {
+                        fprintf(stderr, "%d %zu\n", inst.arg, frame->sp);
+                        ASSERT(inst.arg <= (int)frame->sp);
+                    }
+                    Value *start = &frame->stack[frame->sp - inst.arg];
+                    frame->sp -= inst.arg;
                     print_value(start, inst.arg);
                 } break;
         }
 
-        if(printed_n_times < print_n_cycles) {
+        if(printed_n_times < N_CYCLES_TO_RUN) {
             printed_n_times += 1;
             printf("=========================\n");
             printf("[%zu] %s %d\n", pc, opcode_names[inst.opcode], inst.arg);
-            printf("STACK\n");
-            for(size_t i = 0; i < runtime->stack.count; ++i) {
-                Value a = runtime->stack.items[i];
+            printf("STACK [sp=%zu]\n", frame->sp);
+            for(size_t i = 0; i < frame->sp; ++i) {
+                Value a = frame->stack[i];
                 print_value(&a, 1);
             }
             printf("=========================\n");
         }
-
     }
     return true;
 }
@@ -537,12 +590,11 @@ bool run_module(Runtime *runtime, Module *module)
 {
     CallFrame *frames = malloc(sizeof(*frames) * 1024);
     Value *stack_values = malloc(sizeof(*stack_values) * 1024);
-    runtime->stack.items = stack_values;
-    runtime->call_frames.items = frames;
-    runtime->stack.capacity = 1024;
+    runtime->call_frames.items    = frames;
     runtime->call_frames.capacity = 1024;
     Function *mainfn = &module->functions.items[0];
-    bool result = run_function(runtime, module, mainfn);
+    Value retval = {0};
+    bool result = run_function(runtime, module, mainfn, NULL, 0, &retval);
     free(frames);
     return result;
 }
@@ -572,9 +624,10 @@ bool scope_begin(Parser *parser, bool is_function_root)
     return true;
 }
 
-bool scope_end(Parser *parser)
+bool scope_end(Parser *parser, bool is_function_root)
 {
-    da_pop(&parser->scopes);
+    Scope scope = da_pop(&parser->scopes);
+    ASSERT(scope.is_function_root == is_function_root);
     return true;
 }
 
@@ -674,6 +727,15 @@ bool parse_expr_postfix(Parser *parser, Lexer *lex, Module *module, Function *fu
     switch(lex->token) {
     case TOKEN_OPAREN:
         {
+            add_inst_to_function(func, (Inst){ .opcode = OP_POP_RAX }, module);
+            while(1) {
+                if(!parse_expr(parser, lex, module, func)) return false;
+                if(!lexer_get_token(lex)) return false;
+                if(lex->token == TOKEN_CPAREN) break;
+                if(!lexer_expect_token(lex, TOKEN_COMMA)) return false;
+            }
+            add_inst_to_function(func, (Inst){ .opcode = OP_PUSH_RAX }, module);
+            add_inst_to_function(func, (Inst){ .opcode = OP_CALL }, module);
         } break;
     default:
         lex->parse_point = savedp;
@@ -839,6 +901,7 @@ bool parse_expr(Parser *parser, Lexer *lex, Module *module, Function *func)
 bool parse_block(Parser *parser, Lexer *lex, Module *module, Function *func);
 bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
 {
+    ParsePoint savedp = lex->parse_point;
     if(!lexer_get_token(lex)) return false;
     switch(lex->token) {
         case TOKEN_RETURN:
@@ -849,10 +912,10 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
         case TOKEN_FUNC:
             {
                 if(!lexer_get_and_expect_token(lex, TOKEN_ID)) return false;
-                Function *newfunc = add_new_function_to_module(module, lex->string);
-
+                int new_func_id = add_new_function_to_module(module, lex->string);
                 scope_begin(parser, true);
                 if(!lexer_get_and_expect_token(lex, TOKEN_OPAREN)) return false;
+                Function *newfunc = &module->functions.items[new_func_id];
                 while(1) {
                     ParsePoint savedp = lex->parse_point;
                     if(!lexer_get_token(lex)) return false;
@@ -884,10 +947,22 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                     if(!lexer_get_token(lex)) return false;
                     if(lex->token == TOKEN_CCURLY) break;
                     lex->parse_point = savedp;
+                    // in case the pointer is changed because appending new function inside the function's body
+                    Function *newfunc = &module->functions.items[new_func_id];
                     if(!parse_stmt(parser, lex, module, newfunc)) return false;
                     arena_reset(parser->temp_arena);
                 }
-                scope_end(parser);
+                scope_end(parser, true);
+
+                size_t local_slot = func->locals_count++;
+                // TODO: We use function name here for the table.
+                //       In the future we might want to use an index
+                //       to the string constants in Module for function
+                //       name consider using Parser's prog_arena for
+                //       name that's in the scope's name table
+                scope_setvar(parser, newfunc->name, local_slot);
+                add_inst_to_function(func, ((Inst){ .opcode = OP_PUSH_FUNC, .arg = new_func_id, }), module);
+                add_inst_to_function(func, ((Inst){ .opcode = OP_LOCAL_SET, .arg = local_slot, }), module);
             } break;
         case TOKEN_VAR:
             {
@@ -1004,16 +1079,21 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
         case TOKEN_ID:
             {
                 const char *name = arena_strdup(parser->prog_arena, lex->string);
-                if(!lexer_get_and_expect_token(lex, TOKEN_EQ)) return false;
-                if(!scope_hasvar(parser, name)) {
-                    lexer_diagf(lexer_loc(lex), 
-                            "error: variable with name `%s` is not exists",
-                            name);
-                    return false;
+                if(!lexer_get_token(lex)) return false;
+                if(lex->token == TOKEN_EQ) {
+                    if(!scope_hasvar(parser, name)) {
+                        lexer_diagf(lexer_loc(lex), 
+                                "error: variable with name `%s` is not exists",
+                                name);
+                        return false;
+                    }
+                    size_t local_slot = scope_getvar(parser, name);
+                    if(!parse_expr(parser, lex, module, func)) return false;
+                    add_inst_to_function(func, ((Inst){ .opcode = OP_LOCAL_SET, .arg = local_slot }), module);
+                } else {
+                    lex->parse_point = savedp;
+                    return parse_expr(parser, lex, module, func);
                 }
-                size_t local_slot = scope_getvar(parser, name);
-                if(!parse_expr(parser, lex, module, func)) return false;
-                add_inst_to_function(func, ((Inst){ .opcode = OP_LOCAL_SET, .arg = local_slot }), module);
             } break;
         case TOKEN_PRINT:
             {
@@ -1055,13 +1135,13 @@ bool parse_block(Parser *parser, Lexer *lex, Module *module, Function *func)
         if(!parse_stmt(parser, lex, module, func)) return false;
         arena_reset(parser->temp_arena);
     }
-    scope_end(parser);
+    scope_end(parser, false);
     return true;
 }
 
 bool parse_program(Parser *parser, Lexer *lex, Module *module)
 {
-    Function *mainfn = add_new_function_to_module(module, "__main__");
+    int mainfn = add_new_function_to_module(module, "__main__");
 
     scope_begin(parser, true);
     while(1) {
@@ -1069,10 +1149,10 @@ bool parse_program(Parser *parser, Lexer *lex, Module *module)
         if(!lexer_get_token(lex)) return false;
         if(lex->token == TOKEN_EOF) break;
         lex->parse_point = savedp;
-        if(!parse_stmt(parser, lex, module, mainfn)) return false;
+        if(!parse_stmt(parser, lex, module, &module->functions.items[mainfn])) return false;
         arena_reset(parser->temp_arena);
     }
-    scope_end(parser);
+    scope_end(parser, true);
     return true;
 }
 
@@ -1095,7 +1175,7 @@ void dump_module(Module *module)
             }
         }
         if(func->labels.count > 0) {
-            printf("@labels");
+            printf("@labels\n");
             for(size_t i = 0; i < func->labels.count; ++i) {
                 printf("    [%zu] = %zu\n", i, func->labels.items[i]);
             }
