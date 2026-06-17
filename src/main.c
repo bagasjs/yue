@@ -815,6 +815,11 @@ bool parse_expr_postfix(Parser *parser, Lexer *lex, Module *module, Function *fu
                 {
                     size_t argc = 0;
                     while(1) {
+                        ParsePoint savedp = lex->parse_point;
+                        if(!lexer_get_token(lex)) return false;
+                        if(lex->token == TOKEN_CPAREN) break;
+                        lex->parse_point = savedp;
+
                         if(!parse_expr(parser, lex, module, func)) return false;
                         argc += 1;
                         if(!lexer_get_token(lex)) return false;
@@ -1407,7 +1412,9 @@ int main(int argc, char *argv[]) {
     Runtime runtime = {0};
     runtime.globals.items = globals;
     runtime.globals.capacity = ARRLEN(globals);
-    runtime_setglobal(&runtime, "pi", (Value){ .kind = VALUE_INT, .intv = 3 });
+    runtime_setglobal(&runtime, "nil", (Value){  .kind = VALUE_NIL });
+    runtime_setglobal(&runtime, "true", (Value){ .kind = VALUE_INT, .intv = 1 });
+    runtime_setglobal(&runtime, "false", (Value){ .kind = VALUE_INT, .intv = 0 });
     runtime_setglobal(&runtime, "rand_range", (Value){ .kind = VALUE_CFN, .cfn = f_rand_range });
     runtime_setglobal(&runtime, "append", (Value){ .kind = VALUE_CFN, .cfn = f_append });
     runtime_setglobal(&runtime, "len", (Value){ .kind = VALUE_CFN, .cfn = f_len });
