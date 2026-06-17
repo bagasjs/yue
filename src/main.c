@@ -10,6 +10,8 @@ typedef enum Op {
     OP_PUSH_STR,
     OP_PUSH_FUNC,
 
+    OP_NEW_ARRAY,
+
     OP_ADD,
     OP_SUB,
     OP_MUL,
@@ -21,6 +23,9 @@ typedef enum Op {
     OP_LE,
     OP_AND,
     OP_OR,
+
+    OP_GET_ITEM,
+    OP_SET_ITEM,
 
     OP_LOCAL_SET,
     OP_LOCAL_GET,
@@ -138,7 +143,8 @@ typedef enum {
     VALUE_NIL = 0,
     VALUE_INT,
     VALUE_FLT,
-    VALUE_FUNC,
+    VALUE_FUN,
+    VALUE_CFN, // C function
     VALUE_OBJ,
 } ValueKind;
 
@@ -169,6 +175,9 @@ typedef struct {
     size_t capacity;
 } ObjectArray;
 
+typedef struct Context Context;
+typedef Value (*Cfn)(Context *ctx, Value *args, size_t argc);
+
 typedef struct Value {
     ValueKind kind;
     union {
@@ -176,6 +185,7 @@ typedef struct Value {
         float   fltv;
         int     func_id;
         Object *objv;
+        Cfn     cfn;
     };
 } Value;
 
@@ -373,8 +383,8 @@ void print_value(Value *values, size_t count)
             case VALUE_INT:
                 printf("%d", a.intv);
                 break;
-            case VALUE_FUNC:
-                printf("<func#%d>", a.func_id);
+            case VALUE_FUN:
+                printf("<fun#%d>", a.func_id);
                 break;
             case VALUE_OBJ:
                 {
@@ -385,8 +395,10 @@ void print_value(Value *values, size_t count)
                                 printf("%.*s", (int)str->count, str->items);
                             } break;
                         case OBJECT_ARRAY:
-                            ASSERT(0 && "Not implemented");
-                            break;
+                            {
+                                ObjectArray *arr = (ObjectArray*)a.objv;
+                                printf("<array[%zu]>", arr->count);
+                            } break;
                         default:
                             ASSERT(0 && "Unreachable");
                             break;
@@ -428,26 +440,101 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Value *args,
             case OP_PUSH_FLT:
                 frame->stack[frame->sp++] = ((Value){ .kind = VALUE_FLT, .fltv = module->fltconsts.items[inst.arg] });
                 break;
+            case OP_PUSH_FUNC:
+                frame->stack[frame->sp++] = ((Value){ .kind = VALUE_FUN, .func_id = inst.arg });
+                break;
+
             case OP_PUSH_STR:
                 runtime_pushnewstring(runtime, frame, &module->strconsts.items[inst.arg]);
                 break;
-            case OP_PUSH_FUNC:
-                frame->stack[frame->sp++] = ((Value){ .kind = VALUE_FUNC, .func_id = inst.arg });
+            case OP_NEW_ARRAY:
+                runtime_pushnewarray(runtime, frame);
                 break;
+            case OP_SET_ITEM:
+                {
+                    ASSERT(frame->sp > 3);
+                    Value val = frame->stack[--frame->sp];
+                    Value idx = frame->stack[--frame->sp];
+                    Value obj = frame->stack[--frame->sp];
+                    ASSERT(obj.kind == VALUE_OBJ);
+                    switch(obj.objv->kind) {
+                    case OBJECT_ARRAY:
+                        {
+                            ASSERT(idx.kind == VALUE_INT);
+                            ObjectArray *arr = (ObjectArray*)obj.objv;
+                            if(idx.intv < (int)arr->count) 
+                                arr->items[idx.intv] = val;
+                        } break;
+                    case OBJECT_STRING:
+                        {
+                            ASSERT(idx.kind == VALUE_INT);
+                            ASSERT(val.kind == VALUE_INT);
+                            ObjectString *str = (ObjectString*)obj.objv;
+                            if(idx.intv < (int)str->count) 
+                                str->items[idx.intv] = (char)val.intv;
+                        } break;
+                    default:
+                        ASSERT(0 && "GET_ITEM Unreachable");
+                    }
+                } break;
+            case OP_GET_ITEM:
+                {
+                    ASSERT(frame->sp > 2);
+                    Value idx = frame->stack[--frame->sp];
+                    Value obj = frame->stack[--frame->sp];
+                    ASSERT(obj.kind == VALUE_OBJ);
+                    switch(obj.objv->kind) {
+                    case OBJECT_ARRAY:
+                        {
+                            ObjectArray *arr = (ObjectArray*)obj.objv;
+                            ASSERT(idx.kind == VALUE_INT);
+                            Value result = {0};
+                            if(idx.intv < (int)arr->count) 
+                                result = arr->items[idx.intv];
+                            frame->stack[frame->sp++] = result;
+                        } break;
+                    case OBJECT_STRING:
+                        {
+                            ASSERT(idx.kind == VALUE_INT);
+                            ObjectString *str = (ObjectString*)obj.objv;
+                            Value result = {0};
+                            if(idx.intv < (int)str->count) 
+                                result = (Value){ .kind = VALUE_INT, .intv = str->items[idx.intv] };
+                            frame->stack[frame->sp++] = result;
+                        } break;
+                    default:
+                        ASSERT(0 && "GET_ITEM Unreachable");
+                    }
+                } break;
+
             case OP_CALL:
                 {
                     ASSERT(frame->sp >= (argc + 1));
                     size_t argc = inst.arg;
                     Value newfuncv = frame->stack[frame->sp - argc - 1];
-                    ASSERT(newfuncv.kind == VALUE_FUNC);
-                    Function *newfunc = &module->functions.items[newfuncv.func_id];
-                    ASSERT(argc >= newfunc->params_count);
-                    argc = newfunc->params_count; // we only pass the neccessary
-                    Value *args  = &frame->stack[frame->sp - argc];
-                    Value retval = {0};
-                    if(!run_function(runtime, module, newfunc, args, argc, &retval)) return false;
-                    frame->sp -= argc + 1;
-                    frame->stack[frame->sp++] = retval;
+                    switch(newfuncv.kind) {
+                    case VALUE_FUN:
+                        {
+                            Function *newfunc = &module->functions.items[newfuncv.func_id];
+                            ASSERT(argc >= newfunc->params_count);
+                            argc = newfunc->params_count; // we only pass the neccessary
+                            Value *args  = &frame->stack[frame->sp - argc];
+                            Value retval = {0};
+                            if(!run_function(runtime, module, newfunc, args, argc, &retval)) return false;
+                            frame->sp -= argc + 1;
+                            frame->stack[frame->sp++] = retval;
+                        } break;
+                    case VALUE_CFN:
+                        {
+                            Value *args  = &frame->stack[frame->sp - argc];
+                            Value retval = newfuncv.cfn(NULL, args, argc);
+                            frame->sp -= argc + 1;
+                            frame->stack[frame->sp++] = retval;
+                        } break;
+                    default:
+                        ASSERT(newfuncv.kind == VALUE_FUN || newfuncv.kind == VALUE_CFN);
+                        break;
+                    }
                 } break;
             case OP_RET:
                 {
@@ -557,6 +644,9 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Value *args,
                     frame->sp -= inst.arg;
                     print_value(start, inst.arg);
                 } break;
+            default:
+                ASSERT(0 && "Not implemented or Unreachable");
+                break;
         }
 
         if(print_iter < PRINT_CAP) {
@@ -700,6 +790,13 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
                 }
             }
         } break;
+    case TOKEN_OBRACKET:
+        {
+            if(!lexer_get_and_expect_token(lex, TOKEN_CBRACKET)) return false;
+            add_inst_to_function(func, 
+                    ((Inst){ .opcode = OP_NEW_ARRAY }), 
+                    module);
+        } break;
     default:
         break;
     }
@@ -710,27 +807,35 @@ bool parse_expr_postfix(Parser *parser, Lexer *lex, Module *module, Function *fu
 {
     if(!parse_expr_primary(parser, lex, module, func)) return false;
 
-    ParsePoint savedp = lex->parse_point;
-    if(!lexer_get_token(lex)) return false;
-    switch(lex->token) {
-    case TOKEN_OPAREN:
-        {
-            size_t argc = 0;
-            while(1) {
-                if(!parse_expr(parser, lex, module, func)) return false;
-                argc += 1;
-                if(!lexer_get_token(lex)) return false;
-                if(lex->token == TOKEN_CPAREN) break;
-                if(!lexer_expect_token(lex, TOKEN_COMMA)) return false;
-            }
-            add_inst_to_function(func, (Inst){ .opcode = OP_CALL, .arg = argc }, module);
-        } break;
-    default:
-        lex->parse_point = savedp;
-        break;
+    while(1) {
+        ParsePoint savedp = lex->parse_point;
+        if(!lexer_get_token(lex)) return false;
+        switch(lex->token) {
+            case TOKEN_OPAREN:
+                {
+                    size_t argc = 0;
+                    while(1) {
+                        if(!parse_expr(parser, lex, module, func)) return false;
+                        argc += 1;
+                        if(!lexer_get_token(lex)) return false;
+                        if(lex->token == TOKEN_CPAREN) break;
+                        if(!lexer_expect_token(lex, TOKEN_COMMA)) return false;
+                    }
+                    add_inst_to_function(func, (Inst){ .opcode = OP_CALL, .arg = argc }, module);
+                } break;
+            case TOKEN_OBRACKET:
+                {
+                    if(!parse_expr(parser, lex, module, func)) return false;
+                    if(!lexer_get_and_expect_token(lex, TOKEN_CBRACKET)) return false;
+                    add_inst_to_function(func, (Inst){ .opcode = OP_GET_ITEM, }, module);
+                } break;
+            default:
+                lex->parse_point = savedp;
+                return true;
+        }
     }
 
-    return true;
+    return false;
 }
 
 bool parse_expr_unary(Parser *parser, Lexer *lex, Module *module, Function *func)
@@ -1097,8 +1202,24 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                     if(!parse_expr(parser, lex, module, func)) return false;
                     add_inst_to_function(func, ((Inst){ .opcode = OP_LOCAL_SET, .arg = local_slot }), module);
                 } else {
+                    Token tok = lex->token;
                     lex->parse_point = savedp;
-                    return parse_expr(parser, lex, module, func);
+                    switch(tok) {
+                    case TOKEN_OBRACKET:
+                        {
+                            // TODO: we only support xs[0], how about xs[0][1] ??
+                            if(!parse_expr_primary(parser, lex, module, func)) return false;
+                            if(!lexer_get_and_expect_token(lex, TOKEN_OBRACKET)) return false;
+                            if(!parse_expr(parser, lex, module, func)) return false;
+                            if(!lexer_get_and_expect_token(lex, TOKEN_CBRACKET)) return false;
+                            if(!lexer_get_and_expect_token(lex, TOKEN_EQ)) return false;
+                            if(!parse_expr(parser, lex, module, func)) return false;
+                            add_inst_to_function(func, (Inst){ .opcode = OP_SET_ITEM, }, module);
+                        } break;
+                    default:
+                        if(!parse_expr(parser, lex, module, func)) return false;
+                        break;
+                    }
                 }
             } break;
         case TOKEN_PRINT:
@@ -1121,7 +1242,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
         case TOKEN_SEMICOLON:
             break;
         default:
-            fprintf(stderr, "invalid token %s\n", lexer_display_token(lex->token));
+            lexer_diagf(lexer_loc(lex), "invalid token %s", lexer_display_token(lex->token));
             return false;
     }
     return true;
@@ -1198,6 +1319,43 @@ int rand_range(int min, int max) {
 }
 #endif
 
+Value f_rand_range(Context *ctx, Value *args, size_t argc)
+{
+    ASSERT(argc >= 2 && "rand_range expect more than 2 arguments");
+    Value minv = args[0];
+    Value maxv = args[1];
+    ASSERT(minv.kind == VALUE_INT);
+    ASSERT(maxv.kind == VALUE_INT);
+    Value result = { .kind = VALUE_INT, .intv = rand_range(minv.intv, maxv.intv) };
+    return result;
+}
+
+Value f_append(Context *ctx, Value *args, size_t argc) 
+{
+    ASSERT(argc >= 2 && "append expect more than 2 arguments");
+    Value arrv = args[0];
+    Value newv = args[1];
+    ASSERT(arrv.kind == VALUE_OBJ);
+    ASSERT(arrv.objv->kind == OBJECT_ARRAY);
+
+    ObjectArray *arr = (ObjectArray*)arrv.objv;
+    da_append(arr, newv);
+
+    return (Value){0};
+}
+
+Value f_len(Context *ctx, Value *args, size_t argc) 
+{
+    ASSERT(argc >= 1 && "len expect more than 1 arguments");
+    Value arrv = args[0];
+    Value newv = args[1];
+    ASSERT(arrv.kind == VALUE_OBJ);
+    ASSERT(arrv.objv->kind == OBJECT_ARRAY);
+
+    ObjectArray *arr = (ObjectArray*)arrv.objv;
+    return (Value){ .kind = VALUE_INT, .intv = arr->count, };
+}
+
 int main(int argc, char *argv[]) {
     StringBuilder source = {0};
     if(argc < 2) {
@@ -1250,6 +1408,9 @@ int main(int argc, char *argv[]) {
     runtime.globals.items = globals;
     runtime.globals.capacity = ARRLEN(globals);
     runtime_setglobal(&runtime, "pi", (Value){ .kind = VALUE_INT, .intv = 3 });
+    runtime_setglobal(&runtime, "rand_range", (Value){ .kind = VALUE_CFN, .cfn = f_rand_range });
+    runtime_setglobal(&runtime, "append", (Value){ .kind = VALUE_CFN, .cfn = f_append });
+    runtime_setglobal(&runtime, "len", (Value){ .kind = VALUE_CFN, .cfn = f_len });
 
     parser.runtime = &runtime;
 
