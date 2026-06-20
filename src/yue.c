@@ -71,9 +71,15 @@ const char *opcode_names[] = {
 };
 
 typedef struct {
+    Loc    loc;
     Opcode opcode;
     int    arg;
 } Inst;
+
+// TODO: Replace every ((Inst){ ... }) construction with this function
+static inline Inst make_inst(Opcode opcode, int arg, Loc loc) {
+    return (Inst) { .loc = loc, opcode = opcode, .arg = arg };
+}
 
 typedef struct {
     const char *name;
@@ -709,6 +715,7 @@ void scope_setvar(Parser *parser, const char *name, int slot)
 bool parse_expr(Parser *parser, Lexer *lex, Module *module, Function *func);
 bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *func)
 {
+    Loc loc = lexer_loc(lex);
     if(!lexer_get_token(lex)) return false;
     switch(lex->token) {
     case TOKEN_INT_LIT:
@@ -716,7 +723,7 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
             int arg = module->intconsts.count;
             da_append(&module->intconsts, lex->int_number);
             add_inst_to_function(func, 
-                    ((Inst){ .opcode = OP_PUSH_INT, .arg = arg }), 
+                    make_inst(OP_PUSH_INT, arg, loc), 
                     module);
         } break;
     case TOKEN_CHAR_LIT:
@@ -724,7 +731,7 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
             int arg = module->intconsts.count;
             da_append(&module->intconsts, lex->int_number);
             add_inst_to_function(func, 
-                    ((Inst){ .opcode = OP_PUSH_INT, .arg = arg }), 
+                    make_inst(OP_PUSH_INT, arg, loc),
                     module);
         } break;
     case TOKEN_FLOAT_LIT:
@@ -732,7 +739,7 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
             int arg = module->fltconsts.count;
             da_append(&module->fltconsts, lex->real_number);
             add_inst_to_function(func, 
-                    ((Inst){ .opcode = OP_PUSH_FLT, .arg = arg }), 
+                    make_inst(OP_PUSH_FLT, arg, loc),
                     module);
         } break;
     case TOKEN_STRING_LIT:
@@ -740,7 +747,7 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
             int arg = module->strconsts.count;
             da_append_many(&module->strconsts, lex->string, cstrsz(lex->string));
             add_inst_to_function(func, 
-                    ((Inst){ .opcode = OP_PUSH_STR, .arg = arg }), 
+                    make_inst(OP_PUSH_STR, arg, loc),
                     module);
         } break;
     case TOKEN_ID:
@@ -749,16 +756,16 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
             if(scope_hasvar(parser, name)) {
                 int arg = scope_getvar(parser, name);
                 add_inst_to_function(func, 
-                        ((Inst){ .opcode = OP_LOCAL_GET, .arg = arg }), 
+                        make_inst(OP_LOCAL_GET, arg, loc), 
                         module);
             } else {
                 if(runtime_hasglobal(parser->runtime, name)) {
                     int arg = runtime_getglobal(parser->runtime, name);
                     add_inst_to_function(func, 
-                            ((Inst){ .opcode = OP_GLOBAL_GET, .arg = arg }), 
+                            make_inst(OP_GLOBAL_GET, arg, loc),
                             module);
                 } else {
-                    lexer_diagf(lexer_loc(lex), "error: variable with name `%s` is not exists", name);
+                    lexer_diagf(loc, "error: variable with name `%s` is not exists", name);
                     return false;
                 }
             }
@@ -767,7 +774,7 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
         {
             if(!lexer_get_and_expect_token(lex, TOKEN_CBRACKET)) return false;
             add_inst_to_function(func, 
-                    ((Inst){ .opcode = OP_NEW_ARRAY }), 
+                    make_inst(OP_NEW_ARRAY, 0, loc),
                     module);
         } break;
     default:
@@ -799,13 +806,13 @@ bool parse_expr_postfix(Parser *parser, Lexer *lex, Module *module, Function *fu
                         if(lex->token == TOKEN_CPAREN) break;
                         if(!lexer_expect_token(lex, TOKEN_COMMA)) return false;
                     }
-                    add_inst_to_function(func, (Inst){ .opcode = OP_CALL, .arg = argc }, module);
+                    add_inst_to_function(func, make_inst(OP_CALL, argc, HERE()), module);
                 } break;
             case TOKEN_OBRACKET:
                 {
                     if(!parse_expr(parser, lex, module, func)) return false;
                     if(!lexer_get_and_expect_token(lex, TOKEN_CBRACKET)) return false;
-                    add_inst_to_function(func, (Inst){ .opcode = OP_GET_ITEM, }, module);
+                    add_inst_to_function(func, make_inst(OP_GET_ITEM, 0, HERE()), module);
                 } break;
             default:
                 lex->parse_point = savedp;
@@ -839,7 +846,7 @@ bool parse_expr_binop1(Parser *parser, Lexer *lex, Module *module, Function *fun
                 return true;
         }
         if(!parse_expr_unary(parser, lex, module, func)) return false;
-        add_inst_to_function(func, ((Inst){ .opcode = op }), module);
+        add_inst_to_function(func, make_inst(op, 0, HERE()), module);
     }
 }
 
@@ -863,7 +870,7 @@ bool parse_expr_binop2(Parser *parser, Lexer *lex, Module *module, Function *fun
                 return true;
         }
         if(!parse_expr_binop1(parser, lex, module, func)) return false;
-        add_inst_to_function(func, ((Inst){ .opcode = op }), module);
+        add_inst_to_function(func, make_inst(op, 0, HERE()), module);
     }
 }
 
@@ -893,7 +900,7 @@ bool parse_expr_binop3(Parser *parser, Lexer *lex, Module *module, Function *fun
                 return true;
         }
         if(!parse_expr_binop2(parser, lex, module, func)) return false;
-        add_inst_to_function(func, ((Inst){ .opcode = op }), module);
+        add_inst_to_function(func, make_inst(op, 0, HERE()), module);
     }
 }
 
@@ -917,7 +924,7 @@ bool parse_expr_binop4(Parser *parser, Lexer *lex, Module *module, Function *fun
                 return true;
         }
         if(!parse_expr_binop3(parser, lex, module, func)) return false;
-        add_inst_to_function(func, ((Inst){ .opcode = op }), module);
+        add_inst_to_function(func, (make_inst(op, 0, HERE())), module);
     }
 }
 
@@ -938,7 +945,7 @@ bool parse_expr_binop5(Parser *parser, Lexer *lex, Module *module, Function *fun
                 return true;
         }
         if(!parse_expr_binop4(parser, lex, module, func)) return false;
-        add_inst_to_function(func, ((Inst){ .opcode = op }), module);
+        add_inst_to_function(func, (make_inst(op, 0, HERE())), module);
     }
 }
 
@@ -959,7 +966,7 @@ bool parse_expr_binop6(Parser *parser, Lexer *lex, Module *module, Function *fun
                 return true;
         }
         if(!parse_expr_binop5(parser, lex, module, func)) return false;
-        add_inst_to_function(func, ((Inst){ .opcode = op }), module);
+        add_inst_to_function(func, (make_inst(op, 0, HERE())), module);
     }
 }
 
@@ -978,7 +985,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
         case TOKEN_RETURN:
             {
                 if(!parse_expr(parser, lex, module, func)) return false;
-                add_inst_to_function(func, ((Inst){ .opcode = OP_RET }), module);
+                add_inst_to_function(func, make_inst( OP_RET, 0, HERE()), module);
             } break;
         case TOKEN_FUN:
             {
@@ -1023,8 +1030,8 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                     //       name consider using Parser's prog_arena for
                     //       name that's in the scope's name table
                     scope_setvar(parser, newfunc->name, local_slot);
-                    add_inst_to_function(newfunc, ((Inst){ .opcode = OP_PUSH_FUNC, .arg = new_func_id, }), module);
-                    add_inst_to_function(newfunc, ((Inst){ .opcode = OP_LOCAL_SET, .arg = local_slot, }), module);
+                    add_inst_to_function(newfunc, make_inst(OP_PUSH_FUNC, new_func_id, HERE()), module);
+                    add_inst_to_function(newfunc, make_inst(OP_LOCAL_SET, local_slot, HERE()), module);
                 }
 
                 if(!lexer_get_and_expect_token(lex, TOKEN_OCURLY)) return false;
@@ -1049,8 +1056,8 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                     //       name consider using Parser's prog_arena for
                     //       name that's in the scope's name table
                     scope_setvar(parser, newfunc->name, local_slot);
-                    add_inst_to_function(func, ((Inst){ .opcode = OP_PUSH_FUNC, .arg = new_func_id, }), module);
-                    add_inst_to_function(func, ((Inst){ .opcode = OP_LOCAL_SET, .arg = local_slot, }), module);
+                    add_inst_to_function(func, make_inst( OP_PUSH_FUNC, new_func_id, HERE()), module);
+                    add_inst_to_function(func, make_inst( OP_LOCAL_SET, local_slot, HERE()), module);
                 }
             } break;
         case TOKEN_VAR:
@@ -1067,12 +1074,12 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                 scope_setvar(parser, name, local_slot);
                 if(!lexer_get_and_expect_token(lex, TOKEN_EQ)) return false;
                 if(!parse_expr(parser, lex, module, func)) return false;
-                add_inst_to_function(func, ((Inst){ .opcode = OP_LOCAL_SET, .arg = local_slot, }), module);
+                add_inst_to_function(func, make_inst(OP_LOCAL_SET, local_slot, HERE()), module);
             } break;
         case TOKEN_WHILE:
             {
                 size_t label_start = func->labels.count; // nop is what pointed by label_start
-                add_inst_to_function(func, ((Inst){ .opcode = OP_NOP }), module);
+                add_inst_to_function(func, make_inst(OP_NOP, 0, HERE()), module);
                 size_t label_start_pc = func->insts.count - 1;
                 da_append(&func->labels, label_start_pc);
 
@@ -1083,15 +1090,15 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                 if(!parse_expr(parser, lex, module, func)) return false;
 
                 // Check if the top of the stack is true
-                add_inst_to_function(func, ((Inst){ .opcode = OP_JEZ, .arg = label_end }), module);
+                add_inst_to_function(func, make_inst(OP_JEZ, label_end, HERE()), module);
 
                 if(!lexer_get_and_expect_token(lex, TOKEN_CPAREN)) return false;
                 if(!lexer_get_and_expect_token(lex, TOKEN_OCURLY)) return false;
                 // TODO: support for continue and break statement
                 if(!parse_block(parser, lex, module, func)) return false;
                 if(!lexer_get_and_expect_token(lex, TOKEN_CCURLY)) return false;
-                add_inst_to_function(func, ((Inst){ .opcode = OP_JMP, .arg = label_start }), module);
-                add_inst_to_function(func, ((Inst){ .opcode = OP_NOP }), module);
+                add_inst_to_function(func, make_inst(OP_JMP, label_start, HERE()), module);
+                add_inst_to_function(func, make_inst(OP_NOP, 0, HERE()), module);
 
                 size_t label_end_pc = func->insts.count - 1;
                 func->labels.items[label_end] = label_end_pc;
@@ -1104,7 +1111,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                 // Check if the top of the stack is true and jump to the pre-alloacted label_next
                 size_t label_next = func->labels.count;
                 da_append(&func->labels, 0);
-                add_inst_to_function(func, ((Inst){ .opcode = OP_JEZ, .arg = label_next }), module);
+                add_inst_to_function(func, make_inst(OP_JEZ, label_next, HERE()), module);
 
                 if(!lexer_get_and_expect_token(lex, TOKEN_OCURLY)) return false;
                 if(!parse_block(parser, lex, module, func)) return false;
@@ -1115,21 +1122,21 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                 if(lex->token != TOKEN_ELSE) {
                     lex->parse_point = savedp;
                     // patch label_next to the end of this if() {} statement
-                    add_inst_to_function(func, ((Inst){ .opcode = OP_NOP, }), module);
+                    add_inst_to_function(func, make_inst(OP_NOP, 0, HERE()), module);
                     func->labels.items[label_next] = func->insts.count - 1;
                 } else {
                     // pre-allocate the end label
                     size_t label_end  = func->labels.count;
                     da_append(&func->labels, 0);
                     // the first if statement will jump to label_end as soon as it finished it's body
-                    add_inst_to_function(func, ((Inst){ .opcode = OP_JMP, .arg = label_end }), module);
+                    add_inst_to_function(func, make_inst(OP_JMP, label_end, HERE()), module);
 
                     while(lex->token == TOKEN_ELSE) {
                         if(!lexer_get_token(lex)) return false;
                         if(lex->token == TOKEN_IF) {
                             // else if
                             // patch label_next for the previous if to jump if it's condition is false
-                            add_inst_to_function(func, ((Inst){ .opcode = OP_NOP, }), module);
+                            add_inst_to_function(func, make_inst(OP_NOP, 0, HERE()), module);
                             func->labels.items[label_next] = func->insts.count - 1;
 
                             if(!lexer_get_and_expect_token(lex, TOKEN_OPAREN)) return false;
@@ -1138,19 +1145,19 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                             // Check if the top of the stack is true and jump to the pre-alloacted label_next
                             label_next = func->labels.count;
                             da_append(&func->labels, 0);
-                            add_inst_to_function(func, ((Inst){ .opcode = OP_JEZ, .arg = label_next }), module);
+                            add_inst_to_function(func, make_inst(OP_JEZ, label_next , HERE()), module);
 
                             if(!lexer_get_and_expect_token(lex, TOKEN_OCURLY)) return false;
                             if(!parse_block(parser, lex, module, func)) return false;
                             if(!lexer_get_and_expect_token(lex, TOKEN_CCURLY)) return false;
                             // After finished just go to label_end
-                            add_inst_to_function(func, ((Inst){ .opcode = OP_JMP, .arg = label_end }), module);
+                            add_inst_to_function(func, make_inst(OP_JMP, label_end, HERE()), module);
 
                             if(!lexer_get_token(lex)) return false;
                         } else {
                             // else 
                             // patch label_next for the previous if to jump if it's condition is false
-                            add_inst_to_function(func, ((Inst){ .opcode = OP_NOP, }), module);
+                            add_inst_to_function(func, make_inst(OP_NOP, 0, HERE()), module);
                             func->labels.items[label_next] = func->insts.count - 1;
 
                             if(!lexer_expect_token(lex, TOKEN_OCURLY)) return false;
@@ -1158,7 +1165,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                             if(!lexer_get_and_expect_token(lex, TOKEN_CCURLY)) return false;
                             // lastly patch label_end so after each branches finished their body they can
                             // jump to the end of the entire branch statement
-                            add_inst_to_function(func, ((Inst){ .opcode = OP_NOP, }), module);
+                            add_inst_to_function(func, make_inst(OP_NOP, 0, HERE()), module);
                             func->labels.items[label_end] = func->insts.count - 1;
                             break;
                         }
@@ -1178,7 +1185,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                     }
                     size_t local_slot = scope_getvar(parser, name);
                     if(!parse_expr(parser, lex, module, func)) return false;
-                    add_inst_to_function(func, ((Inst){ .opcode = OP_LOCAL_SET, .arg = local_slot }), module);
+                    add_inst_to_function(func, make_inst(OP_LOCAL_SET, local_slot , HERE()), module);
                 } else {
                     Token tok = lex->token;
                     lex->parse_point = savedp;
@@ -1197,11 +1204,11 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                                 Token next_token = lex->token;
                                 lex->parse_point = savedp;
                                 if(next_token != TOKEN_OBRACKET) break;
-                                add_inst_to_function(func, (Inst){ .opcode = OP_GET_ITEM, }, module);
+                                add_inst_to_function(func, make_inst(OP_GET_ITEM, 0, HERE()), module);
                             }
                             if(!lexer_get_and_expect_token(lex, TOKEN_EQ)) return false;
                             if(!parse_expr(parser, lex, module, func)) return false;
-                            add_inst_to_function(func, (Inst){ .opcode = OP_SET_ITEM, }, module);
+                            add_inst_to_function(func, make_inst(OP_SET_ITEM, 0, HERE()), module);
                         } break;
                     default:
                         if(!parse_expr(parser, lex, module, func)) return false;
@@ -1218,7 +1225,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                     ParsePoint savedp = lex->parse_point;
                     if(!lexer_get_token(lex)) return false;
                     if(lex->token != TOKEN_COMMA) {
-                        add_inst_to_function(func, ((Inst){ .opcode = OP_PRINT, .arg = n }), module);
+                        add_inst_to_function(func, make_inst(OP_PRINT, n , HERE()), module);
                         lex->parse_point = savedp;
                         break;
                     }

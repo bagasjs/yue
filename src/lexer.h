@@ -45,7 +45,7 @@ typedef struct {
     const char *line_end;
 } Loc;
 
-#define HERE() (Loc){ __FILE__, -1, __LINE__ }
+#define HERE() (Loc){ .input_path = __FILE__, .line_offset = -1, .line_number = __LINE__, .line_start = NULL, .line_end = NULL }
 
 #define compiler_missingf(loc, ...) _compiler_missingf(__FILE__, __LINE__, loc, __VA_ARGS__)
 void _compiler_missingf(const char *file, int line, Loc loc, const char *fmt, ...);
