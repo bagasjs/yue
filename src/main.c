@@ -452,7 +452,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Value *args,
                 break;
             case OP_SET_ITEM:
                 {
-                    ASSERT(frame->sp > 3);
+                    ASSERT(frame->sp >= 3);
                     Value val = frame->stack[--frame->sp];
                     Value idx = frame->stack[--frame->sp];
                     Value obj = frame->stack[--frame->sp];
@@ -747,6 +747,14 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
     if(!lexer_get_token(lex)) return false;
     switch(lex->token) {
     case TOKEN_INT_LIT:
+        {
+            int arg = module->intconsts.count;
+            da_append(&module->intconsts, lex->int_number);
+            add_inst_to_function(func, 
+                    ((Inst){ .opcode = OP_PUSH_INT, .arg = arg }), 
+                    module);
+        } break;
+    case TOKEN_CHAR_LIT:
         {
             int arg = module->intconsts.count;
             da_append(&module->intconsts, lex->int_number);

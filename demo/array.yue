@@ -1,7 +1,9 @@
 var xs = []
-append(xs, [])
-append(xs, 2)
-append(xs[0], 1)
-print(xs[1])
-xs[1] = 3
-print(xs[1])
+var ys = []
+append(xs, ys)
+append(xs, 1)
+append(ys, 69)
+
+print(xs[0][0])
+xs[0][0] = 420
+print(xs[0][0])
