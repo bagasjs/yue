@@ -76,7 +76,6 @@ typedef struct {
     int    arg;
 } Inst;
 
-// TODO: Replace every ((Inst){ ... }) construction with this function
 static inline Inst make_inst(Opcode opcode, int arg, Loc loc) {
     return (Inst) { .loc = loc, opcode = opcode, .arg = arg };
 }
@@ -498,9 +497,11 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                         {
                             Yue_Value *args  = &frame->stack[frame->sp - new_argc];
                             Yue_Value retval = {0};
-                            newfuncv.cfn(NULL, args, new_argc, &retval);
+                            int retc = newfuncv.cfn(NULL, args, new_argc, &retval);
                             frame->sp -= new_argc + 1;
-                            frame->stack[frame->sp++] = retval;
+                            if(retc > 0) {
+                                frame->stack[frame->sp++] = retval;
+                            }
                         } break;
                     default:
                         ASSERT(newfuncv.kind == YUE_VALUE_FUN || newfuncv.kind == YUE_VALUE_CFN);

@@ -57,6 +57,10 @@ fun main(args) {
 ```c
 #include "yue.h"
 #include "raylib.h"
+#include <string.h>
+#include <assert.h>
+
+...
 
 yue_value f_init_window(yue_context *ctx, yue_value *args, int argc)
 {
@@ -69,11 +73,18 @@ yue_value f_init_window(yue_context *ctx, yue_value *args, int argc)
 }
 
 int main(int argc, char *argv[]) {
-    yue_context *ctx = yue_newcontext();
+    Yue_Context *ctx = yue_open();
 
-    yue_globals_set(ctx, "init_window", yue_cfunc(f_init_window));
+    assert(argc > 0)
+    char *source = read_entire_file_text(argv[1]);
+    if(!source) return -1;
 
-    yue_dofile(ctx, argv[1]);
+    yue_set_global_value(ctx, "init_window", yue_cfunc(f_init_window));
+
+    int ret = yue_do_string(ctx, argv[1], source, strlen(source));
+    yue_close(ctx);
+
+    return ret;
 }
 
 ```
