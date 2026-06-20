@@ -41,6 +41,26 @@ struct Yue_Value {
     };
 };
 
+struct Yue_Object {
+    Yue_Object     *next;
+    Yue_Object_Kind kind;
+    bool marked;
+};
+
+typedef struct Yue_Object_String {
+    Yue_Object  base;
+    char       *items;
+    Yue_Int     count;
+    Yue_Int     capacity;
+} Yue_Object_String;
+
+typedef struct Yue_Object_Array {
+    Yue_Object  base;
+    Yue_Value  *items;
+    Yue_Int     count;
+    Yue_Int     capacity;
+} Yue_Object_Array;
+
 Yue_Context *yue_open(void);
 void         yue_close(Yue_Context *ctx);
 
@@ -51,10 +71,9 @@ Yue_Value yue_new_string(Yue_Context *ctx, const char *init_text);
 Yue_Value yue_new_array(Yue_Context *ctx);
 Yue_Value yue_new_table(Yue_Context *ctx);
 
-bool yue_isstring(Yue_Value value);
-bool yue_isarray(Yue_Value value);
-bool yue_istable(Yue_Value value);
-
+bool yue_is_string(Yue_Value value);
+bool yue_is_array(Yue_Value value);
+bool yue_is_table(Yue_Value value);
 
 // yue_array.c
 void yue_array_append(Yue_Value array, Yue_Value item);
