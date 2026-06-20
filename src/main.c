@@ -509,26 +509,26 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Value *args,
 
             case OP_CALL:
                 {
-                    ASSERT(frame->sp >= (argc + 1));
-                    size_t argc = inst.arg;
-                    Value newfuncv = frame->stack[frame->sp - argc - 1];
+                    size_t new_argc = inst.arg;
+                    ASSERT(frame->sp >= (new_argc + 1));
+                    Value newfuncv = frame->stack[frame->sp - new_argc - 1];
                     switch(newfuncv.kind) {
                     case VALUE_FUN:
                         {
                             Function *newfunc = &module->functions.items[newfuncv.func_id];
-                            ASSERT(argc >= newfunc->params_count);
-                            argc = newfunc->params_count; // we only pass the neccessary
-                            Value *args  = &frame->stack[frame->sp - argc];
+                            ASSERT(new_argc >= newfunc->params_count);
+                            new_argc = newfunc->params_count; // we only pass the neccessary
+                            Value *args  = &frame->stack[frame->sp - new_argc];
                             Value retval = {0};
-                            if(!run_function(runtime, module, newfunc, args, argc, &retval)) return false;
-                            frame->sp -= argc + 1;
+                            if(!run_function(runtime, module, newfunc, args, new_argc, &retval)) return false;
+                            frame->sp -= new_argc + 1;
                             frame->stack[frame->sp++] = retval;
                         } break;
                     case VALUE_CFN:
                         {
-                            Value *args  = &frame->stack[frame->sp - argc];
-                            Value retval = newfuncv.cfn(NULL, args, argc);
-                            frame->sp -= argc + 1;
+                            Value *args  = &frame->stack[frame->sp - new_argc];
+                            Value retval = newfuncv.cfn(NULL, args, new_argc);
+                            frame->sp -= new_argc + 1;
                             frame->stack[frame->sp++] = retval;
                         } break;
                     default:
