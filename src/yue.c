@@ -2,6 +2,7 @@
 #include "utils.h"
 #include "lexer.h"
 #include "shtable.h"
+#include "yue.h"
 
 typedef enum Op {
     OP_NOP = 0,
@@ -138,78 +139,41 @@ int find_function_in_module(const char *name, Module *module)
     return -1;
 }
 
-typedef struct Value Value;
-typedef enum {
-    VALUE_NIL = 0,
-    VALUE_INT,
-    VALUE_FLT,
-    VALUE_FUN,
-    VALUE_CFN, // C function
-    VALUE_OBJ,
-} ValueKind;
-
-typedef enum {
-    OBJECT_NIL = 0,
-    OBJECT_STRING,
-    OBJECT_ARRAY,
-} ObjectKind;
-
-typedef struct Object Object;
-struct Object {
-    Object    *next;
-    ObjectKind kind;
-    bool       marked;
+struct Yue_Object {
+    Yue_Object     *next;
+    Yue_Object_Kind kind;
+    bool            marked;
 };
 
-typedef struct {
-    Object base;
-    char  *items;
-    size_t count;
-    size_t capacity;
-} ObjectString;
+typedef struct Yue_Object_String {
+    Yue_Object base;
+    Yue_String string;
+} Yue_Object_String;
 
-typedef struct {
-    Object base;
-    Value *items;
-    size_t count;
-    size_t capacity;
-} ObjectArray;
-
-typedef struct Context Context;
-typedef Value (*Cfn)(Context *ctx, Value *args, size_t argc);
-
-typedef struct Value {
-    ValueKind kind;
-    union {
-        int     intv;
-        float   fltv;
-        int     func_id;
-        Object *objv;
-        Cfn     cfn;
-    };
-} Value;
+typedef struct Yue_Object_Array {
+    Yue_Object base;
+    Yue_Array  array;
+} Yue_Object_Array;
 
 #define STACK_CAP 1024
 typedef struct CallFrame {
-    Value  locals[1024];
-    Value  stack[STACK_CAP];
+    Yue_Value  locals[1024];
+    Yue_Value  stack[STACK_CAP];
     size_t sp;
-
-    Value  rax; // regista
 } CallFrame;
 
 typedef struct Runtime {
     struct {
-        Value *items;
-        size_t count;
-        size_t capacity;
+        Yue_Value *items;
+        size_t     count;
+        size_t     capacity;
     } globals;
     shtable_t globals_nametable;
 
     struct {
-        Object **items;
-        size_t   count;
-        size_t  capacity;
+        Yue_Object **items;
+        size_t       count;
+        size_t       capacity;
     } all;
 
     struct {
@@ -229,7 +193,7 @@ int runtime_getglobal(Runtime *runtime, const char *name)
     return (intptr_t)shtable_get(&runtime->globals_nametable, name);
 }
 
-void runtime_setglobal(Runtime *runtime, const char *name, Value value)
+void runtime_setglobal(Runtime *runtime, const char *name, Yue_Value value)
 {
     int shtable_item_slot = shtable_geti(&runtime->globals_nametable, name);
     if(shtable_item_slot < 0) {
@@ -242,15 +206,15 @@ void runtime_setglobal(Runtime *runtime, const char *name, Value value)
     }
 }
 
-void runtime_mark_object(Runtime *runtime, Object *object)
+void runtime_mark_object(Runtime *runtime, Yue_Object *object)
 {
     if(object->marked) return;
     object->marked = true;
-    if(object->kind == OBJECT_ARRAY) {
-        ObjectArray *arr = (ObjectArray*)object;
-        for(size_t i = 0; i < arr->count; ++i) {
-            Value val = arr->items[i];
-            if(val.kind == VALUE_OBJ) 
+    if(object->kind == YUE_OBJECT_ARRAY) {
+        Yue_Object_Array *arr = (Yue_Object_Array*)object;
+        for(size_t i = 0; i < arr->array.count; ++i) {
+            Yue_Value val = arr->array.items[i];
+            if(val.kind == YUE_VALUE_OBJ) 
                 runtime_mark_object(runtime, val.objv);
         }
     }
@@ -260,8 +224,8 @@ void runtime_mark_used_objects(Runtime *runtime)
 {
     // Mark objects in global variables
     for(size_t i = 0; i < runtime->globals.count; ++i) {
-        Value val = runtime->globals.items[i];
-        if(val.kind == VALUE_OBJ) 
+        Yue_Value val = runtime->globals.items[i];
+        if(val.kind == YUE_VALUE_OBJ) 
             runtime_mark_object(runtime, val.objv);
     }
 
@@ -269,35 +233,35 @@ void runtime_mark_used_objects(Runtime *runtime)
     for(size_t i = 0; i < runtime->call_frames.count; ++i) {
         CallFrame *frame = &runtime->call_frames.items[i];
         for(size_t j = 0; j < ARRLEN(frame->locals); ++j) {
-            Value val = frame->locals[j];
-            if(val.kind == VALUE_OBJ) runtime_mark_object(runtime, val.objv);
+            Yue_Value val = frame->locals[j];
+            if(val.kind == YUE_VALUE_OBJ) runtime_mark_object(runtime, val.objv);
         }
         // Mark objects in stack
         for(size_t j = 0; j < STACK_CAP; ++j) {
-            Value val = frame->stack[j];
-            if(val.kind == VALUE_OBJ) 
+            Yue_Value val = frame->stack[j];
+            if(val.kind == YUE_VALUE_OBJ) 
                 runtime_mark_object(runtime, val.objv);
         }
     }
 }
 
-void runtime_destroy_object(Runtime *runtime, Object *object)
+void runtime_destroy_object(Runtime *runtime, Yue_Object *object)
 {
     (void)runtime;
     switch(object->kind) {
-    case OBJECT_NIL:
+    case YUE_OBJECT_NIL:
         free(object);
         break;
-    case OBJECT_STRING:
+    case YUE_OBJECT_STRING:
         {
-            ObjectString *str = (ObjectString*)object;
-            free(str->items);
+            Yue_Object_String *str = (Yue_Object_String*)object;
+            free(str->string.items);
             free(str);
         } break;
-    case OBJECT_ARRAY:
+    case YUE_OBJECT_ARRAY:
         {
-            ObjectArray *arr = (ObjectArray*)object;
-            free(arr->items);
+            Yue_Object_Array *arr  = (Yue_Object_Array*)object;
+            free(arr->array.items);
             free(arr);
         } break;
     default:
@@ -308,7 +272,7 @@ void runtime_destroy_object(Runtime *runtime, Object *object)
 void runtime_sweep_unused_objects(Runtime *runtime)
 {
     for(size_t i = 0; i < runtime->all.count;) {
-        Object *obj = runtime->all.items[i];
+        Yue_Object *obj = runtime->all.items[i];
         if(obj->marked) {
             obj->marked = false;
             ++i;
@@ -319,10 +283,10 @@ void runtime_sweep_unused_objects(Runtime *runtime)
     }
 }
 
-Object *runtime_newobject(Runtime *runtime, ObjectKind kind, size_t size)
+Yue_Object *runtime_newobject(Runtime *runtime, Yue_Object_Kind kind, size_t size)
 {
-    ASSERT(size >= sizeof(Object));
-    Object *obj  = malloc(size);
+    ASSERT(size >= sizeof(Yue_Object));
+    Yue_Object *obj  = malloc(size);
     obj->kind = kind;
     obj->marked = false;
     if(runtime->all.count + 1 > runtime->all.capacity) {
@@ -346,58 +310,58 @@ Object *runtime_newobject(Runtime *runtime, ObjectKind kind, size_t size)
     return obj;
 }
 
-Object *runtime_pushnewstring(Runtime *runtime, CallFrame *frame, const char *init_text)
+Yue_Object *runtime_pushnewstring(Runtime *runtime, CallFrame *frame, const char *init_text)
 {
-    ObjectString *obj = (ObjectString*)runtime_newobject(runtime, OBJECT_STRING, sizeof(ObjectString));
-    obj->count    = 0;
-    obj->capacity = 0;
-    obj->items    = 0;
+    Yue_Object_String *obj = (Yue_Object_String*)runtime_newobject(runtime, YUE_OBJECT_STRING, sizeof(Yue_Object_String));
+    obj->string.count    = 0;
+    obj->string.capacity = 0;
+    obj->string.items    = 0;
     if(init_text) 
-        da_append_many(obj, init_text, cstrsz(init_text));
-    frame->stack[frame->sp++] = ((Value){ .kind = VALUE_OBJ, .objv = (Object*)obj });
-    return (Object*)obj;
+        da_append_many(&obj->string, init_text, cstrsz(init_text));
+    frame->stack[frame->sp++] = ((Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj });
+    return (Yue_Object*)obj;
 }
 
-Object *runtime_pushnewarray(Runtime *runtime, CallFrame *frame)
+Yue_Object *runtime_pushnewarray(Runtime *runtime, CallFrame *frame)
 {
-    ObjectArray *obj = (ObjectArray*)runtime_newobject(runtime, OBJECT_ARRAY, sizeof(ObjectArray));
-    obj->count    = 0;
-    obj->capacity = 0;
-    obj->items    = 0;
-    frame->stack[frame->sp++] = ((Value){ .kind = VALUE_OBJ, .objv = (Object*)obj });
-    return (Object*)obj;
+    Yue_Object_Array *obj = (Yue_Object_Array*)runtime_newobject(runtime, YUE_OBJECT_ARRAY, sizeof(Yue_Object_Array));
+    obj->array.count    = 0;
+    obj->array.capacity = 0;
+    obj->array.items    = 0;
+    frame->stack[frame->sp++] = ((Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj });
+    return (Yue_Object*)obj;
 }
 
-void print_value(Value *values, size_t count)
+void print_value(Yue_Value *values, size_t count)
 {
     for(size_t i = 0; i < count; ++i) {
         if(i != 0) printf(" ");
-        Value a = values[i];
+        Yue_Value a = values[i];
         switch(a.kind) {
-            case VALUE_NIL:
+            case YUE_VALUE_NIL:
                 printf("<nil>");
                 break;
-            case VALUE_FLT:
+            case YUE_VALUE_FLT:
                 printf("%f", a.fltv);
                 break;
-            case VALUE_INT:
+            case YUE_VALUE_INT:
                 printf("%d", a.intv);
                 break;
-            case VALUE_FUN:
-                printf("<fun#%d>", a.func_id);
+            case YUE_VALUE_FUN:
+                printf("<fun#%d>", a.fun_id);
                 break;
-            case VALUE_OBJ:
+            case YUE_VALUE_OBJ:
                 {
                     switch(a.objv->kind) {
-                        case OBJECT_STRING:
+                        case YUE_OBJECT_STRING:
                             {
-                                ObjectString *str = (ObjectString*)a.objv;
-                                printf("%.*s", (int)str->count, str->items);
+                                Yue_Object_String *str = (Yue_Object_String*)a.objv;
+                                printf("%.*s", (int)str->string.count, str->string.items);
                             } break;
-                        case OBJECT_ARRAY:
+                        case YUE_OBJECT_ARRAY:
                             {
-                                ObjectArray *arr = (ObjectArray*)a.objv;
-                                printf("<array[%zu]>", arr->count);
+                                Yue_Object_Array *arr = (Yue_Object_Array*)a.objv;
+                                printf("<array[%zu]>", arr->array.count);
                             } break;
                         default:
                             ASSERT(0 && "Unreachable");
@@ -412,7 +376,7 @@ void print_value(Value *values, size_t count)
     printf("\n");
 }
 
-bool run_function(Runtime *runtime, Module *module, Function *func, Value *args, size_t argc, Value *retval)
+bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *args, size_t argc, Yue_Value *retval)
 {
     size_t pc = 0;
     int print_iter = 0;
@@ -435,13 +399,13 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Value *args,
             case OP_NOP:
                 break;
             case OP_PUSH_INT:
-                frame->stack[frame->sp++] = ((Value){ .kind = VALUE_INT, .intv = module->intconsts.items[inst.arg] });
+                frame->stack[frame->sp++] = ((Yue_Value){ .kind = YUE_VALUE_INT, .intv = module->intconsts.items[inst.arg] });
                 break;
             case OP_PUSH_FLT:
-                frame->stack[frame->sp++] = ((Value){ .kind = VALUE_FLT, .fltv = module->fltconsts.items[inst.arg] });
+                frame->stack[frame->sp++] = ((Yue_Value){ .kind = YUE_VALUE_FLT, .fltv = module->fltconsts.items[inst.arg] });
                 break;
             case OP_PUSH_FUNC:
-                frame->stack[frame->sp++] = ((Value){ .kind = VALUE_FUN, .func_id = inst.arg });
+                frame->stack[frame->sp++] = ((Yue_Value){ .kind = YUE_VALUE_FUN, .fun_id = inst.arg });
                 break;
 
             case OP_PUSH_STR:
@@ -453,25 +417,25 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Value *args,
             case OP_SET_ITEM:
                 {
                     ASSERT(frame->sp >= 3);
-                    Value val = frame->stack[--frame->sp];
-                    Value idx = frame->stack[--frame->sp];
-                    Value obj = frame->stack[--frame->sp];
-                    ASSERT(obj.kind == VALUE_OBJ);
+                    Yue_Value val = frame->stack[--frame->sp];
+                    Yue_Value idx = frame->stack[--frame->sp];
+                    Yue_Value obj = frame->stack[--frame->sp];
+                    ASSERT(obj.kind == YUE_VALUE_OBJ);
                     switch(obj.objv->kind) {
-                    case OBJECT_ARRAY:
+                    case YUE_OBJECT_ARRAY:
                         {
-                            ASSERT(idx.kind == VALUE_INT);
-                            ObjectArray *arr = (ObjectArray*)obj.objv;
-                            if(idx.intv < (int)arr->count) 
-                                arr->items[idx.intv] = val;
+                            ASSERT(idx.kind == YUE_VALUE_INT);
+                            Yue_Object_Array *arr = (Yue_Object_Array*)obj.objv;
+                            if(idx.intv < (int)arr->array.count) 
+                                arr->array.items[idx.intv] = val;
                         } break;
-                    case OBJECT_STRING:
+                    case YUE_OBJECT_STRING:
                         {
-                            ASSERT(idx.kind == VALUE_INT);
-                            ASSERT(val.kind == VALUE_INT);
-                            ObjectString *str = (ObjectString*)obj.objv;
-                            if(idx.intv < (int)str->count) 
-                                str->items[idx.intv] = (char)val.intv;
+                            ASSERT(idx.kind == YUE_VALUE_INT);
+                            ASSERT(val.kind == YUE_VALUE_INT);
+                            Yue_Object_String *str = (Yue_Object_String*)obj.objv;
+                            if(idx.intv < (int)str->string.count) 
+                                str->string.items[idx.intv] = (char)val.intv;
                         } break;
                     default:
                         ASSERT(0 && "GET_ITEM Unreachable");
@@ -480,26 +444,26 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Value *args,
             case OP_GET_ITEM:
                 {
                     ASSERT(frame->sp > 2);
-                    Value idx = frame->stack[--frame->sp];
-                    Value obj = frame->stack[--frame->sp];
-                    ASSERT(obj.kind == VALUE_OBJ);
+                    Yue_Value idx = frame->stack[--frame->sp];
+                    Yue_Value obj = frame->stack[--frame->sp];
+                    ASSERT(obj.kind == YUE_VALUE_OBJ);
                     switch(obj.objv->kind) {
-                    case OBJECT_ARRAY:
+                    case YUE_OBJECT_ARRAY:
                         {
-                            ObjectArray *arr = (ObjectArray*)obj.objv;
-                            ASSERT(idx.kind == VALUE_INT);
-                            Value result = {0};
-                            if(idx.intv < (int)arr->count) 
-                                result = arr->items[idx.intv];
+                            Yue_Object_Array *arr = (Yue_Object_Array*)obj.objv;
+                            ASSERT(idx.kind == YUE_VALUE_INT);
+                            Yue_Value result = {0};
+                            if(idx.intv < (int)arr->array.count) 
+                                result = arr->array.items[idx.intv];
                             frame->stack[frame->sp++] = result;
                         } break;
-                    case OBJECT_STRING:
+                    case YUE_OBJECT_STRING:
                         {
-                            ASSERT(idx.kind == VALUE_INT);
-                            ObjectString *str = (ObjectString*)obj.objv;
-                            Value result = {0};
-                            if(idx.intv < (int)str->count) 
-                                result = (Value){ .kind = VALUE_INT, .intv = str->items[idx.intv] };
+                            ASSERT(idx.kind == YUE_VALUE_INT);
+                            Yue_Object_String *str = (Yue_Object_String*)obj.objv;
+                            Yue_Value result = {0};
+                            if(idx.intv < (int)str->string.count) 
+                                result = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = str->string.items[idx.intv] };
                             frame->stack[frame->sp++] = result;
                         } break;
                     default:
@@ -511,34 +475,35 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Value *args,
                 {
                     size_t new_argc = inst.arg;
                     ASSERT(frame->sp >= (new_argc + 1));
-                    Value newfuncv = frame->stack[frame->sp - new_argc - 1];
+                    Yue_Value newfuncv = frame->stack[frame->sp - new_argc - 1];
                     switch(newfuncv.kind) {
-                    case VALUE_FUN:
+                    case YUE_VALUE_FUN:
                         {
-                            Function *newfunc = &module->functions.items[newfuncv.func_id];
+                            Function *newfunc = &module->functions.items[newfuncv.fun_id];
                             ASSERT(new_argc >= newfunc->params_count);
                             new_argc = newfunc->params_count; // we only pass the neccessary
-                            Value *args  = &frame->stack[frame->sp - new_argc];
-                            Value retval = {0};
+                            Yue_Value *args  = &frame->stack[frame->sp - new_argc];
+                            Yue_Value retval = {0};
                             if(!run_function(runtime, module, newfunc, args, new_argc, &retval)) return false;
                             frame->sp -= new_argc + 1;
                             frame->stack[frame->sp++] = retval;
                         } break;
-                    case VALUE_CFN:
+                    case YUE_VALUE_CFN:
                         {
-                            Value *args  = &frame->stack[frame->sp - new_argc];
-                            Value retval = newfuncv.cfn(NULL, args, new_argc);
+                            Yue_Value *args  = &frame->stack[frame->sp - new_argc];
+                            Yue_Value retval = {0};
+                            newfuncv.cfn(NULL, args, new_argc, &retval);
                             frame->sp -= new_argc + 1;
                             frame->stack[frame->sp++] = retval;
                         } break;
                     default:
-                        ASSERT(newfuncv.kind == VALUE_FUN || newfuncv.kind == VALUE_CFN);
+                        ASSERT(newfuncv.kind == YUE_VALUE_FUN || newfuncv.kind == YUE_VALUE_CFN);
                         break;
                     }
                 } break;
             case OP_RET:
                 {
-                    Value a = frame->stack[--frame->sp];
+                    Yue_Value a = frame->stack[--frame->sp];
                     *retval = a;
                     running = false;
                 } break;
@@ -555,9 +520,9 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Value *args,
             case OP_AND:
             case OP_OR:
                 {
-                    Value a = frame->stack[--frame->sp];
-                    Value b = frame->stack[--frame->sp];
-                    ASSERT(a.kind == b.kind && a.kind == VALUE_INT);
+                    Yue_Value a = frame->stack[--frame->sp];
+                    Yue_Value b = frame->stack[--frame->sp];
+                    ASSERT(a.kind == b.kind && a.kind == YUE_VALUE_INT);
                     switch(inst.opcode) {
                     case OP_ADD:
                         b.intv += a.intv;
@@ -607,7 +572,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Value *args,
                 break;
             case OP_GLOBAL_GET:
                 {
-                    Value value = runtime->globals.items[inst.arg];
+                    Yue_Value value = runtime->globals.items[inst.arg];
                     frame->stack[frame->sp++] = value;
                 } break;
 
@@ -621,12 +586,12 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Value *args,
                     ASSERT(inst.arg < (int)func->labels.count);
                     size_t new_pc = func->labels.items[inst.arg];
 
-                    Value a = frame->stack[--frame->sp];
+                    Yue_Value a = frame->stack[--frame->sp];
                     switch(a.kind) {
-                    case VALUE_NIL:
+                    case YUE_VALUE_NIL:
                         pc = new_pc;
                         break;
-                    case VALUE_INT:
+                    case YUE_VALUE_INT:
                         if(a.intv == 0) pc = new_pc;
                         break;
                     default:
@@ -640,7 +605,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Value *args,
                         fprintf(stderr, "%d %zu\n", inst.arg, frame->sp);
                         ASSERT(inst.arg <= (int)frame->sp);
                     }
-                    Value *start = &frame->stack[frame->sp - inst.arg];
+                    Yue_Value *start = &frame->stack[frame->sp - inst.arg];
                     frame->sp -= inst.arg;
                     print_value(start, inst.arg);
                 } break;
@@ -655,7 +620,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Value *args,
             printf("[%zu] %s %d\n", pc, opcode_names[inst.opcode], inst.arg);
             printf("STACK [callframe=%zu, sp=%zu]\n", frame_ptr, frame->sp);
             for(size_t i = 0; i < frame->sp; ++i) {
-                Value a = frame->stack[i];
+                Yue_Value a = frame->stack[i];
                 print_value(&a, 1);
             }
             printf("=========================\n");
@@ -667,11 +632,11 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Value *args,
 bool run_module(Runtime *runtime, Module *module)
 {
     CallFrame *frames = malloc(sizeof(*frames) * 1024);
-    Value *stack_values = malloc(sizeof(*stack_values) * 1024);
+    Yue_Value *stack_values = malloc(sizeof(*stack_values) * 1024);
     runtime->call_frames.items    = frames;
     runtime->call_frames.capacity = 1024;
     Function *mainfn = &module->functions.items[0];
-    Value retval = {0};
+    Yue_Value retval = {0};
     bool result = run_function(runtime, module, mainfn, NULL, 0, &retval);
     free(frames);
     return result;
@@ -1341,41 +1306,41 @@ int rand_range(int min, int max) {
 }
 #endif
 
-Value f_rand_range(Context *ctx, Value *args, size_t argc)
+int f_rand_range(Yue_Context *ctx, Yue_Value *args, int argc, Yue_Value *retval)
 {
     ASSERT(argc >= 2 && "rand_range expect more than 2 arguments");
-    Value minv = args[0];
-    Value maxv = args[1];
-    ASSERT(minv.kind == VALUE_INT);
-    ASSERT(maxv.kind == VALUE_INT);
-    Value result = { .kind = VALUE_INT, .intv = rand_range(minv.intv, maxv.intv) };
-    return result;
+    Yue_Value minv = args[0];
+    Yue_Value maxv = args[1];
+    ASSERT(minv.kind == YUE_VALUE_INT);
+    ASSERT(maxv.kind == YUE_VALUE_INT);
+    *retval = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = rand_range(minv.intv, maxv.intv) };
+    return 0;
 }
 
-Value f_append(Context *ctx, Value *args, size_t argc) 
+int f_append(Yue_Context *ctx, Yue_Value *args, int argc, Yue_Value *retval) 
 {
     ASSERT(argc >= 2 && "append expect more than 2 arguments");
-    Value arrv = args[0];
-    Value newv = args[1];
-    ASSERT(arrv.kind == VALUE_OBJ);
-    ASSERT(arrv.objv->kind == OBJECT_ARRAY);
+    Yue_Value arrv = args[0];
+    Yue_Value newv = args[1];
+    ASSERT(arrv.kind == YUE_VALUE_OBJ);
+    ASSERT(arrv.objv->kind == YUE_OBJECT_ARRAY);
 
-    ObjectArray *arr = (ObjectArray*)arrv.objv;
-    da_append(arr, newv);
-
-    return (Value){0};
+    Yue_Object_Array *arr = (Yue_Object_Array*)arrv.objv;
+    da_append(&arr->array, newv);
+    return 0;
 }
 
-Value f_len(Context *ctx, Value *args, size_t argc) 
+int f_len(Yue_Context *ctx, Yue_Value *args, int argc, Yue_Value *retval) 
 {
     ASSERT(argc >= 1 && "len expect more than 1 arguments");
-    Value arrv = args[0];
-    Value newv = args[1];
-    ASSERT(arrv.kind == VALUE_OBJ);
-    ASSERT(arrv.objv->kind == OBJECT_ARRAY);
+    Yue_Value arrv = args[0];
+    Yue_Value newv = args[1];
+    ASSERT(arrv.kind == YUE_VALUE_OBJ);
+    ASSERT(arrv.objv->kind == YUE_OBJECT_ARRAY);
 
-    ObjectArray *arr = (ObjectArray*)arrv.objv;
-    return (Value){ .kind = VALUE_INT, .intv = arr->count, };
+    Yue_Object_Array *arr = (Yue_Object_Array*)arrv.objv;
+    *retval = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = arr->array.count, };
+    return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -1425,16 +1390,16 @@ int main(int argc, char *argv[]) {
     parser.temp_arena = &temp_arena;
     parser.prog_arena = &prog_arena;
 
-    Value globals[1024] = {0};
+    Yue_Value globals[1024] = {0};
     Runtime runtime = {0};
     runtime.globals.items = globals;
     runtime.globals.capacity = ARRLEN(globals);
-    runtime_setglobal(&runtime, "nil", (Value){  .kind = VALUE_NIL });
-    runtime_setglobal(&runtime, "true", (Value){ .kind = VALUE_INT, .intv = 1 });
-    runtime_setglobal(&runtime, "false", (Value){ .kind = VALUE_INT, .intv = 0 });
-    runtime_setglobal(&runtime, "rand_range", (Value){ .kind = VALUE_CFN, .cfn = f_rand_range });
-    runtime_setglobal(&runtime, "append", (Value){ .kind = VALUE_CFN, .cfn = f_append });
-    runtime_setglobal(&runtime, "len", (Value){ .kind = VALUE_CFN, .cfn = f_len });
+    runtime_setglobal(&runtime, "nil", (Yue_Value){  .kind = YUE_VALUE_NIL });
+    runtime_setglobal(&runtime, "true", (Yue_Value){ .kind = YUE_VALUE_INT, .intv = 1 });
+    runtime_setglobal(&runtime, "false", (Yue_Value){ .kind = YUE_VALUE_INT, .intv = 0 });
+    runtime_setglobal(&runtime, "rand_range", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_rand_range });
+    runtime_setglobal(&runtime, "append", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_append });
+    runtime_setglobal(&runtime, "len", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_len });
 
     parser.runtime = &runtime;
 

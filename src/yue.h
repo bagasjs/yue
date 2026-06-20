@@ -12,7 +12,8 @@ typedef struct Yue_String  Yue_String;
 typedef struct Yue_Array   Yue_Array;
 
 // Native function
-typedef int (*Yue_Cfn)(Yue_Context *ctx, Yue_Value *args, Yue_Int argc, Yue_Value *retval);
+// Return 0 if okay
+typedef int (*Yue_Cfn)(Yue_Context *ctx, Yue_Value *args, int argc, Yue_Value *retval);
 
 typedef enum Yue_Value_Kind {
     YUE_VALUE_NIL = 0,
@@ -41,25 +42,17 @@ struct Yue_Value {
     };
 };
 
-struct Yue_Object {
-    Yue_Object     *next;
-    Yue_Object_Kind kind;
-    bool marked;
-};
+typedef struct Yue_String {
+    char   *items;
+    size_t  count;
+    size_t  capacity;
+} Yue_String;
 
-typedef struct Yue_Object_String {
-    Yue_Object  base;
-    char       *items;
-    Yue_Int     count;
-    Yue_Int     capacity;
-} Yue_Object_String;
-
-typedef struct Yue_Object_Array {
-    Yue_Object  base;
-    Yue_Value  *items;
-    Yue_Int     count;
-    Yue_Int     capacity;
-} Yue_Object_Array;
+typedef struct Yue_Array {
+    Yue_Value *items;
+    size_t     count;
+    size_t     capacity;
+} Yue_Array;
 
 Yue_Context *yue_open(void);
 void         yue_close(Yue_Context *ctx);
@@ -67,16 +60,15 @@ void         yue_close(Yue_Context *ctx);
 int yue_set_global_value(Yue_Context *ctx, const char *name, Yue_Value  value);
 int yue_get_global_value(Yue_Context *ctx, const char *name, Yue_Value *value);
 
-Yue_Value yue_new_string(Yue_Context *ctx, const char *init_text);
-Yue_Value yue_new_array(Yue_Context *ctx);
-Yue_Value yue_new_table(Yue_Context *ctx);
+Yue_String *yue_new_string(Yue_Context *ctx, const char *init_text);
+Yue_Array  *yue_new_array(Yue_Context *ctx);
 
 bool yue_is_string(Yue_Value value);
 bool yue_is_array(Yue_Value value);
 bool yue_is_table(Yue_Value value);
 
 // yue_array.c
-void yue_array_append(Yue_Value array, Yue_Value item);
-void yue_array_insert(Yue_Value array, Yue_Value item);
+void yue_array_append(Yue_Array *array, Yue_Value item);
+void yue_array_insert(Yue_Array *array, Yue_Value item);
 
 #endif // YUE_H_
