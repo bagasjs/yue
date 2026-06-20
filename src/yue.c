@@ -196,7 +196,7 @@ bool runtime_hasglobal(Runtime *runtime, const char *name)
 
 int runtime_getglobal(Runtime *runtime, const char *name)
 {
-    return (intptr_t)shtable_get(&runtime->globals_nametable, name);
+    return (intptr_t)shtable_get_or(&runtime->globals_nametable, name, (void*)-1);
 }
 
 void runtime_setglobal(Runtime *runtime, const char *name, Yue_Value value)
@@ -1350,6 +1350,55 @@ int f_len(Yue_Context *ctx, Yue_Value *args, int argc, Yue_Value *retval)
     return 0;
 }
 
+/// Context implementation
+
+struct Yue_Context {
+    Arena prog_arena;
+    Arena temp_arena;
+
+    Parser    parser;
+    Lexer     lexer;
+    Runtime   runtime;
+    Yue_Value globals[1024];
+};
+
+Yue_Context *yue_open(void)
+{
+    Yue_Context *ctx = malloc(sizeof(*ctx));
+    bufset(ctx, 0, sizeof(*ctx));
+
+    ctx->runtime.globals.items    = ctx->globals;
+    ctx->runtime.globals.capacity = ARRLEN(ctx->globals);
+    ctx->parser.runtime           = &ctx->runtime;
+    ctx->parser.prog_arena        = &ctx->prog_arena;
+    ctx->parser.temp_arena        = &ctx->temp_arena;
+    return ctx;
+}
+
+void yue_close(Yue_Context *ctx)
+{
+    arena_destroy(&ctx->prog_arena);
+    arena_destroy(&ctx->temp_arena);
+    lexer_destroy(&ctx->lexer);
+    free(ctx);
+}
+
+int yue_set_global_value(Yue_Context *ctx, const char *name, Yue_Value value)
+{
+    runtime_setglobal(&ctx->runtime, name, value);
+    return 0;
+}
+
+int yue_get_global_value(Yue_Context *ctx, const char *name, Yue_Value *value)
+{
+    int slot = runtime_getglobal(&ctx->runtime, name);
+    if(slot < 0) {
+        return -1;
+    }
+    *value = ctx->globals[slot];
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     StringBuilder source = {0};
     if(argc < 2) {
@@ -1389,32 +1438,19 @@ int main(int argc, char *argv[]) {
 
     Module module = {0};
 
-    Lexer lexer = lexer_new(source_filepath, source.items, source.items + source.count);
-    Parser parser = {0};
+    Yue_Context *ctx = yue_open();
+    ctx->lexer = lexer_new(source_filepath, source.items, source.items + source.count);
+    yue_set_global_value(ctx, "nil",   (Yue_Value){ .kind = YUE_VALUE_NIL });
+    yue_set_global_value(ctx, "true",  (Yue_Value){ .kind = YUE_VALUE_INT, .intv = 1 });
+    yue_set_global_value(ctx, "false", (Yue_Value){ .kind = YUE_VALUE_INT, .intv = 0 });
+    yue_set_global_value(ctx, "rand_range", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_rand_range });
+    yue_set_global_value(ctx, "append", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_append });
+    yue_set_global_value(ctx, "len", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_len });
 
-    Arena prog_arena = {0};
-    Arena temp_arena = {0};
-    parser.temp_arena = &temp_arena;
-    parser.prog_arena = &prog_arena;
-
-    Yue_Value globals[1024] = {0};
-    Runtime runtime = {0};
-    runtime.globals.items = globals;
-    runtime.globals.capacity = ARRLEN(globals);
-    runtime_setglobal(&runtime, "nil", (Yue_Value){  .kind = YUE_VALUE_NIL });
-    runtime_setglobal(&runtime, "true", (Yue_Value){ .kind = YUE_VALUE_INT, .intv = 1 });
-    runtime_setglobal(&runtime, "false", (Yue_Value){ .kind = YUE_VALUE_INT, .intv = 0 });
-    runtime_setglobal(&runtime, "rand_range", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_rand_range });
-    runtime_setglobal(&runtime, "append", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_append });
-    runtime_setglobal(&runtime, "len", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_len });
-
-    parser.runtime = &runtime;
-
-    if(!parse_program(&parser, &lexer, &module)) return -1;
+    if(!parse_program(&ctx->parser, &ctx->lexer, &module)) return -1;
     /*dump_module(&module);*/
-    if(!run_module(&runtime, &module)) return false;
+    if(!run_module(&ctx->runtime, &module)) return false;
 
-    arena_destroy(&prog_arena);
-    arena_destroy(&temp_arena);
+    yue_close(ctx);
     return 0;
 }

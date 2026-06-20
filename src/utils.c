@@ -150,6 +150,15 @@ void *bufcpy(void *dst, const void *src, size_t n)
     return dst;
 }
 
+void *bufset(void *dst, int value, size_t n)
+{
+    uint8_t *d = dst;
+    for(size_t i = 0; i < n; ++i) {
+        d[i] = value;
+    }
+    return dst;
+}
+
 #ifdef NDEBUG
 #define DEBUGLOG(...)
 #else

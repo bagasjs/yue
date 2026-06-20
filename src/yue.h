@@ -60,6 +60,11 @@ void         yue_close(Yue_Context *ctx);
 int yue_set_global_value(Yue_Context *ctx, const char *name, Yue_Value  value);
 int yue_get_global_value(Yue_Context *ctx, const char *name, Yue_Value *value);
 
+int yue_do_string(Yue_Context *ctx, const char *source, size_t length);
+
+/// Object Manipulation here
+
+
 Yue_String *yue_new_string(Yue_Context *ctx, const char *init_text);
 Yue_Array  *yue_new_array(Yue_Context *ctx);
 
