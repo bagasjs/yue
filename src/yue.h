@@ -54,6 +54,18 @@ typedef struct Yue_Array {
     size_t     capacity;
 } Yue_Array;
 
+typedef struct Yue_Table_Entry {
+    // Although it's Yue_Value it must be YUE_OBJECT_STRING
+    Yue_Value key;
+    Yue_Value value;
+} Yue_Table_Entry;
+
+typedef struct Yue_Table {
+    Yue_Table_Entry *items;
+    size_t  count;
+    size_t  capacity;
+} Yue_Table;
+
 Yue_Context *yue_open(void);
 void         yue_close(Yue_Context *ctx);
 

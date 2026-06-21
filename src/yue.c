@@ -12,6 +12,7 @@ typedef enum Op {
     OP_PUSH_FUNC,
 
     OP_NEW_ARRAY,
+    OP_NEW_TABLE,
 
     OP_ADD,
     OP_SUB,
@@ -46,6 +47,9 @@ const char *opcode_names[] = {
     [OP_PUSH_FLT] = "OP_PUSH_FLT",
     [OP_PUSH_STR] = "OP_PUSH_STR",
     [OP_PUSH_FUNC] = "OP_PUSH_FUNC",
+
+    [OP_NEW_ARRAY] = "OP_NEW_ARRAY",
+    [OP_NEW_TABLE] = "OP_NEW_TABLE",
 
     [OP_ADD] = "OP_ADD",
     [OP_SUB] = "OP_SUB",
@@ -160,6 +164,11 @@ typedef struct Yue_Object_Array {
     Yue_Array  array;
 } Yue_Object_Array;
 
+typedef struct Yue_Object_Table {
+    Yue_Object base;
+    Yue_Table  table;
+} Yue_Object_Table;
+
 #define STACK_CAP 1024
 typedef struct CallFrame {
     Yue_Value  locals[1024];
@@ -269,6 +278,12 @@ void runtime_destroy_object(Runtime *runtime, Yue_Object *object)
             free(arr->array.items);
             free(arr);
         } break;
+    case YUE_OBJECT_TABLE:
+        {
+            Yue_Object_Table *table = (Yue_Object_Table*)object;
+            free(table->table.items);
+            free(table);
+        } break;
     default:
         ASSERT(0 && "Unreachable");
     }
@@ -337,6 +352,16 @@ Yue_Object *runtime_pushnewarray(Runtime *runtime, CallFrame *frame)
     return (Yue_Object*)obj;
 }
 
+Yue_Object *runtime_push_new_table(Runtime *runtime, CallFrame *frame)
+{
+    Yue_Object_Table *obj = (Yue_Object_Table*)runtime_newobject(runtime, YUE_OBJECT_TABLE, sizeof(Yue_Object_Table));
+    obj->table.count    = 0;
+    obj->table.capacity = 0;
+    obj->table.items    = 0;
+    frame->stack[frame->sp++] = ((Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj });
+    return (Yue_Object*)obj;
+}
+
 void print_value(Yue_Value *values, size_t count)
 {
     for(size_t i = 0; i < count; ++i) {
@@ -367,6 +392,11 @@ void print_value(Yue_Value *values, size_t count)
                             {
                                 Yue_Object_Array *arr = (Yue_Object_Array*)a.objv;
                                 printf("<array[%zu]>", arr->array.count);
+                            } break;
+                        case YUE_OBJECT_TABLE:
+                            {
+                                Yue_Object_Table *table = (Yue_Object_Table*)a.objv;
+                                printf("<table[%zu]>", table->table.count);
                             } break;
                         default:
                             ASSERT(0 && "Unreachable");
@@ -419,6 +449,10 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
             case OP_NEW_ARRAY:
                 runtime_pushnewarray(runtime, frame);
                 break;
+            case OP_NEW_TABLE:
+                runtime_push_new_table(runtime, frame);
+                break;
+
             case OP_SET_ITEM:
                 {
                     ASSERT(frame->sp >= 3);
@@ -448,7 +482,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                 } break;
             case OP_GET_ITEM:
                 {
-                    ASSERT(frame->sp > 2);
+                    ASSERT(frame->sp >= 2);
                     Yue_Value idx = frame->stack[--frame->sp];
                     Yue_Value obj = frame->stack[--frame->sp];
                     ASSERT(obj.kind == YUE_VALUE_OBJ);
@@ -776,6 +810,13 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
             if(!lexer_get_and_expect_token(lex, TOKEN_CBRACKET)) return false;
             add_inst_to_function(func, 
                     make_inst(OP_NEW_ARRAY, 0, loc),
+                    module);
+        } break;
+    case TOKEN_OCURLY:
+        {
+            if(!lexer_get_and_expect_token(lex, TOKEN_CCURLY)) return false;
+            add_inst_to_function(func, 
+                    make_inst(OP_NEW_TABLE, 0, loc),
                     module);
         } break;
     default:
@@ -1455,3 +1496,11 @@ int main(int argc, char *argv[]) {
     yue_close(ctx);
     return 0;
 }
+
+/// TODOs:
+/// 1. We're not supporting array literal syntax yet `var arr = [1,2,3,4,5]`
+/// 2. Table feature
+///     a. Table field indexing syntax `person["name"]`
+///     b. Table field access syntax `person.name`
+///     c. Table literal syntax `{ "name": "foo" }`
+///     d. How do I iterate table?
