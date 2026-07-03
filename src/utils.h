@@ -30,6 +30,7 @@
 void *bufcpy(void *dst, const void *src, size_t n);
 void *bufset(void *dst, const int value, size_t n);
 bool  cstreq(const char *a, const char *b);
+bool  cstrneq(const char *a, size_t a_len, const char *b, size_t b_len);
 size_t cstrlen(const char *cstr); // doesn't include the zero termination
 size_t cstrsz(const char *cstr); // size includes the zero termination
 

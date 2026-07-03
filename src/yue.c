@@ -197,6 +197,49 @@ typedef struct Runtime {
     } call_frames;
 } Runtime;
 
+Yue_String *yue_to_string(Yue_Value value)
+{
+    if(value.kind != YUE_VALUE_OBJ) return NULL;
+    if(value.objv->kind != YUE_OBJECT_STRING) return NULL;
+    Yue_Object_String *str = (Yue_Object_String*)value.objv;
+    return &str->string;
+}
+
+void yue_table_setitem(Yue_Table *table, Yue_Value keyv, Yue_Value value)
+{
+    Yue_String *key = yue_to_string(keyv);
+    ASSERT(key && "Table must be accessed with string key");
+
+    for(size_t i = 0; i < table->count; ++i) {
+        Yue_Table_Entry entry = table->items[i];
+        Yue_String *entry_key = yue_to_string(entry.key);
+        if(cstrneq(key->items, key->count, entry_key->items, entry_key->count)) {
+            table->items[i].value = value;
+        }
+    }
+
+    Yue_Table_Entry entry = {0};
+    entry.key   = keyv;
+    entry.value = value;
+    da_append(table, entry); 
+}
+
+Yue_Value yue_table_getitem(Yue_Table *table, Yue_Value keyv)
+{
+    Yue_String *key = yue_to_string(keyv);
+    ASSERT(key && "Table must be accessed with string key");
+
+    for(size_t i = 0; i < table->count; ++i) {
+        Yue_Table_Entry entry = table->items[i];
+        Yue_String *entry_key = yue_to_string(entry.key);
+        if(cstrneq(key->items, key->count, entry_key->items, entry_key->count)) {
+            return table->items[i].value;
+        }
+    }
+    Yue_Value nil = { .kind = YUE_VALUE_NIL };
+    return nil;
+}
+
 bool runtime_hasglobal(Runtime *runtime, const char *name)
 {
     return (intptr_t)(void*)shtable_geti(&runtime->globals_nametable, name) >= 0;
@@ -224,13 +267,29 @@ void runtime_mark_object(Runtime *runtime, Yue_Object *object)
 {
     if(object->marked) return;
     object->marked = true;
-    if(object->kind == YUE_OBJECT_ARRAY) {
-        Yue_Object_Array *arr = (Yue_Object_Array*)object;
-        for(size_t i = 0; i < arr->array.count; ++i) {
-            Yue_Value val = arr->array.items[i];
-            if(val.kind == YUE_VALUE_OBJ) 
-                runtime_mark_object(runtime, val.objv);
-        }
+    switch(object->kind) {
+    case YUE_OBJECT_ARRAY:
+        {
+            Yue_Object_Array *arr = (Yue_Object_Array*)object;
+            for(size_t i = 0; i < arr->array.count; ++i) {
+                Yue_Value val = arr->array.items[i];
+                if(val.kind == YUE_VALUE_OBJ) 
+                    runtime_mark_object(runtime, val.objv);
+            }
+        } break;
+    case YUE_OBJECT_TABLE:
+        {
+            Yue_Object_Table *table = (Yue_Object_Table*)object;
+            for(size_t i = 0; i < table->table.count; ++i) {
+                Yue_Table_Entry entry = table->table.items[i];
+                if(entry.key.kind == YUE_VALUE_OBJ) 
+                    runtime_mark_object(runtime, entry.key.objv);
+                if(entry.value.kind == YUE_VALUE_OBJ) 
+                    runtime_mark_object(runtime, entry.value.objv);
+            }
+        } break;
+    default:
+        break;
     }
 }
 
@@ -476,8 +535,13 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                             if(idx.intv < (int)str->string.count) 
                                 str->string.items[idx.intv] = (char)val.intv;
                         } break;
+                    case YUE_OBJECT_TABLE:
+                        {
+                            Yue_Object_Table *table = (Yue_Object_Table*)obj.objv;
+                            yue_table_setitem(&table->table, idx, val);
+                        } break;
                     default:
-                        ASSERT(0 && "GET_ITEM Unreachable");
+                        ASSERT(0 && "SET_ITEM Unreachable");
                     }
                 } break;
             case OP_GET_ITEM:
@@ -503,6 +567,12 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                             Yue_Value result = {0};
                             if(idx.intv < (int)str->string.count) 
                                 result = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = str->string.items[idx.intv] };
+                            frame->stack[frame->sp++] = result;
+                        } break;
+                    case YUE_OBJECT_TABLE:
+                        {
+                            Yue_Object_Table *table = (Yue_Object_Table*)obj.objv;
+                            Yue_Value result = yue_table_getitem(&table->table, idx);
                             frame->stack[frame->sp++] = result;
                         } break;
                     default:
@@ -1441,7 +1511,8 @@ int yue_get_global_value(Yue_Context *ctx, const char *name, Yue_Value *value)
     return 0;
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[]) 
+{
     StringBuilder source = {0};
     if(argc < 2) {
         fprintf(stderr, "ERROR: provide a file\n");
@@ -1498,6 +1569,7 @@ int main(int argc, char *argv[]) {
 }
 
 /// TODOs:
+/// 0. Table
 /// 1. We're not supporting array literal syntax yet `var arr = [1,2,3,4,5]`
 /// 2. Table feature
 ///     a. Table field indexing syntax `person["name"]`

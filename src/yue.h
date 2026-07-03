@@ -74,14 +74,15 @@ int yue_get_global_value(Yue_Context *ctx, const char *name, Yue_Value *value);
 
 int yue_do_string(Yue_Context *ctx, const char *file, const char *source, size_t length);
 
-/// Object Manipulation here
-
-
 Yue_Value yue_new_string(Yue_Context *ctx, const char *init_text);
 Yue_Value yue_new_array(Yue_Context *ctx);
 
-// yue_array.c
+Yue_String *yue_to_string(Yue_Value value);
+
+/// Object Operations (yue_objects.c)
 void yue_array_append(Yue_Array *array, Yue_Value item);
 void yue_array_insert(Yue_Array *array, Yue_Value item);
+void      yue_table_setitem(Yue_Table *table, Yue_Value key, Yue_Value value);
+Yue_Value yue_table_getitem(Yue_Table *table, Yue_Value key);
 
 #endif // YUE_H_

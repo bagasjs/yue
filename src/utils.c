@@ -140,6 +140,15 @@ size_t cstrsz(const char *cstr)
     return n;
 }
 
+bool cstrneq(const char *a, size_t a_len, const char *b, size_t b_len)
+{
+    if(a_len != b_len) return false;
+    for(size_t i = 0; i < a_len; ++i) {
+        if(a[i] != b[i]) return false;
+    }
+    return true;
+}
+
 void *bufcpy(void *dst, const void *src, size_t n)
 {
     uint8_t *d = dst;
