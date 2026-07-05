@@ -439,6 +439,9 @@ void print_value(Yue_Value *values, size_t count)
             case YUE_VALUE_FUN:
                 printf("<fun#%d>", a.fun_id);
                 break;
+            case YUE_VALUE_CFN:
+                printf("<cfn at %p>", a.cfn);
+                break;
             case YUE_VALUE_OBJ:
                 {
                     switch(a.objv->kind) {
@@ -474,7 +477,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
 {
     size_t pc = 0;
     int print_iter = 0;
-    const int PRINT_CAP = 0;
+    const int PRINT_CAP = 1000;
 
     size_t frame_ptr = runtime->call_frames.count;
     sa_append(&runtime->call_frames, ((CallFrame){0}));
@@ -1569,10 +1572,10 @@ int main(int argc, char *argv[])
 }
 
 /// TODOs:
-/// 0. Table
 /// 1. We're not supporting array literal syntax yet `var arr = [1,2,3,4,5]`
 /// 2. Table feature
 ///     a. Table field indexing syntax `person["name"]`
 ///     b. Table field access syntax `person.name`
 ///     c. Table literal syntax `{ "name": "foo" }`
 ///     d. How do I iterate table?
+/// 3. Better Embedding API
