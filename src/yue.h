@@ -10,10 +10,9 @@ typedef struct Yue_Value   Yue_Value;
 typedef struct Yue_Table   Yue_Table;
 typedef struct Yue_String  Yue_String;
 typedef struct Yue_Array   Yue_Array;
+typedef struct Yue_Call_Info Yue_Call_Info;
 
-// Native function
-// Return 0 if okay
-typedef int (*Yue_Cfn)(Yue_Context *ctx, Yue_Value *args, int argc, Yue_Value *retval);
+typedef void (*Yue_Cfn)(Yue_Context *ctx, Yue_Call_Info *info); // Native Function
 
 typedef enum Yue_Value_Kind {
     YUE_VALUE_NIL = 0,
@@ -40,6 +39,13 @@ struct Yue_Value {
         Yue_Int     fun_id;
         Yue_Cfn     cfn;
     };
+};
+
+struct Yue_Call_Info {
+    Yue_Value *argv; // argument values
+    int        argc; // count of argv
+    Yue_Value  retv; // return values
+    int        retc; // count of retv (for now only support 0 and 1)
 };
 
 typedef struct Yue_String {

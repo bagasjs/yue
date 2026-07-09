@@ -594,20 +594,22 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                             Function *newfunc = &module->functions.items[newfuncv.fun_id];
                             ASSERT(new_argc >= newfunc->params_count);
                             new_argc = newfunc->params_count; // we only pass the neccessary
-                            Yue_Value *args  = &frame->stack[frame->sp - new_argc];
+                            Yue_Value *new_args  = &frame->stack[frame->sp - new_argc];
                             Yue_Value retval = {0};
-                            if(!run_function(runtime, module, newfunc, args, new_argc, &retval)) return false;
+                            if(!run_function(runtime, module, newfunc, new_args, new_argc, &retval)) return false;
                             frame->sp -= new_argc + 1;
                             frame->stack[frame->sp++] = retval;
                         } break;
                     case YUE_VALUE_CFN:
                         {
-                            Yue_Value *args  = &frame->stack[frame->sp - new_argc];
-                            Yue_Value retval = {0};
-                            int retc = newfuncv.cfn(NULL, args, new_argc, &retval);
+                            Yue_Value *new_args  = &frame->stack[frame->sp - new_argc];
+                            Yue_Call_Info info = {0};
+                            info.argv = new_args;
+                            info.argc = new_argc;
+                            newfuncv.cfn(NULL, &info);
                             frame->sp -= new_argc + 1;
-                            if(retc > 0) {
-                                frame->stack[frame->sp++] = retval;
+                            if(info.retc > 0) {
+                                frame->stack[frame->sp++] = info.retv;
                             }
                         } break;
                     default:
@@ -1428,41 +1430,41 @@ int rand_range(int min, int max) {
 }
 #endif
 
-int f_rand_range(Yue_Context *ctx, Yue_Value *args, int argc, Yue_Value *retval)
+void f_rand_range(Yue_Context *ctx, Yue_Call_Info *info)
 {
-    ASSERT(argc >= 2 && "rand_range expect more than 2 arguments");
-    Yue_Value minv = args[0];
-    Yue_Value maxv = args[1];
+    ASSERT(info->argc >= 2 && "rand_range expect more than 2 arguments");
+    Yue_Value minv = info->argv[0];
+    Yue_Value maxv = info->argv[1];
     ASSERT(minv.kind == YUE_VALUE_INT);
     ASSERT(maxv.kind == YUE_VALUE_INT);
-    *retval = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = rand_range(minv.intv, maxv.intv) };
-    return 1;
+    info->retv = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = rand_range(minv.intv, maxv.intv) };
+    info->retc = 1;
 }
 
-int f_append(Yue_Context *ctx, Yue_Value *args, int argc, Yue_Value *retval) 
+void f_append(Yue_Context *ctx, Yue_Call_Info *info) 
 {
-    ASSERT(argc >= 2 && "append expect more than 2 arguments");
-    Yue_Value arrv = args[0];
-    Yue_Value newv = args[1];
+    ASSERT(info->argc >= 2 && "append expect more than 2 arguments");
+    Yue_Value arrv = info->argv[0];
+    Yue_Value newv = info->argv[1];
     ASSERT(arrv.kind == YUE_VALUE_OBJ);
     ASSERT(arrv.objv->kind == YUE_OBJECT_ARRAY);
 
     Yue_Object_Array *arr = (Yue_Object_Array*)arrv.objv;
     da_append(&arr->array, newv);
-    return 0;
+    info->retc = 0;
 }
 
-int f_len(Yue_Context *ctx, Yue_Value *args, int argc, Yue_Value *retval) 
+void f_len(Yue_Context *ctx, Yue_Call_Info *info) 
 {
-    ASSERT(argc >= 1 && "len expect more than 1 arguments");
-    Yue_Value arrv = args[0];
-    Yue_Value newv = args[1];
+    ASSERT(info->argc >= 1 && "len expect more than 1 arguments");
+    Yue_Value arrv = info->argv[0];
+    Yue_Value newv = info->argv[1];
     ASSERT(arrv.kind == YUE_VALUE_OBJ);
     ASSERT(arrv.objv->kind == YUE_OBJECT_ARRAY);
 
     Yue_Object_Array *arr = (Yue_Object_Array*)arrv.objv;
-    *retval = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = arr->array.count, };
-    return 1;
+    info->retv = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = arr->array.count, };
+    info->retc = 1;
 }
 
 /// Context implementation
