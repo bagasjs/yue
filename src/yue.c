@@ -477,7 +477,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
 {
     size_t pc = 0;
     int print_iter = 0;
-    const int PRINT_CAP = 1000;
+    const int PRINT_CAP = 0;
 
     size_t frame_ptr = runtime->call_frames.count;
     sa_append(&runtime->call_frames, ((CallFrame){0}));
@@ -1436,7 +1436,7 @@ int f_rand_range(Yue_Context *ctx, Yue_Value *args, int argc, Yue_Value *retval)
     ASSERT(minv.kind == YUE_VALUE_INT);
     ASSERT(maxv.kind == YUE_VALUE_INT);
     *retval = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = rand_range(minv.intv, maxv.intv) };
-    return 0;
+    return 1;
 }
 
 int f_append(Yue_Context *ctx, Yue_Value *args, int argc, Yue_Value *retval) 
@@ -1462,7 +1462,7 @@ int f_len(Yue_Context *ctx, Yue_Value *args, int argc, Yue_Value *retval)
 
     Yue_Object_Array *arr = (Yue_Object_Array*)arrv.objv;
     *retval = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = arr->array.count, };
-    return 0;
+    return 1;
 }
 
 /// Context implementation
