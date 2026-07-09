@@ -25,6 +25,7 @@ typedef enum Op {
     OP_LE,
     OP_AND,
     OP_OR,
+    OP_NOT,
 
     OP_GET_ITEM,
     OP_SET_ITEM,
@@ -62,6 +63,10 @@ const char *opcode_names[] = {
     [OP_LE] = "OP_LE",
     [OP_AND] = "OP_AND",
     [OP_OR] = "OP_OR",
+    [OP_NOT] = "OP_NOT",
+
+    [OP_GET_ITEM] = "OP_GET_ITEM",
+    [OP_SET_ITEM] = "OP_SET_ITEM",
 
     [OP_LOCAL_SET] = "OP_LOCAL_SET",
     [OP_LOCAL_GET] = "OP_LOCAL_GET",
@@ -70,6 +75,7 @@ const char *opcode_names[] = {
     [OP_JMP] = "OP_JMP",
     [OP_JEZ] = "OP_JEZ",
     [OP_PRINT] = "OP_PRINT",
+
     [OP_CALL] = "OP_CALL",
     [OP_RET] = "OP_RET",
 };
@@ -492,6 +498,20 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
     while(running) {
         if(pc >= func->insts.count) break;
         Inst inst = func->insts.items[pc++];
+        if(print_iter < PRINT_CAP) {
+            print_iter += 1;
+            printf("==============================\n");
+            printf("STATS [print_iter=%d, callframe=%zu, sp=%zu]\n", print_iter, frame_ptr, frame->sp);
+            printf("------------------\n");
+            printf("CURRENT STACK:\n");
+            for(size_t i = 0; i < frame->sp; ++i) {
+                Yue_Value a = frame->stack[i];
+                print_value(&a, 1);
+            }
+            printf("------------------\n");
+            printf("[%zu] %s %d\n", pc, opcode_names[inst.opcode], inst.arg);
+            printf("==============================\n");
+        }
         switch(inst.opcode) {
             case OP_NOP:
                 break;
@@ -623,6 +643,18 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                     *retval = a;
                     running = false;
                 } break;
+            case OP_NOT:
+                {
+                    ASSERT(frame->sp >= 1);
+                    Yue_Value a = frame->stack[--frame->sp];
+                    ASSERT(a.kind == YUE_VALUE_INT || a.kind == YUE_VALUE_NIL);
+                    if(a.kind == YUE_VALUE_INT) {
+                        a.intv = !a.intv;
+                        frame->stack[frame->sp++] = a;
+                    } else {
+                        frame->stack[frame->sp++] = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = 1 };
+                    }
+                } break;
 
             case OP_ADD:
             case OP_MUL:
@@ -728,18 +760,6 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
             default:
                 ASSERT(0 && "Not implemented or Unreachable");
                 break;
-        }
-
-        if(print_iter < PRINT_CAP) {
-            print_iter += 1;
-            printf("=========================\n");
-            printf("[%zu] %s %d\n", pc, opcode_names[inst.opcode], inst.arg);
-            printf("STACK [callframe=%zu, sp=%zu]\n", frame_ptr, frame->sp);
-            for(size_t i = 0; i < frame->sp; ++i) {
-                Yue_Value a = frame->stack[i];
-                print_value(&a, 1);
-            }
-            printf("=========================\n");
         }
     }
     return true;
@@ -902,6 +922,7 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
 
 bool parse_expr_postfix(Parser *parser, Lexer *lex, Module *module, Function *func)
 {
+    Loc loc = lexer_loc(lex);
     if(!parse_expr_primary(parser, lex, module, func)) return false;
 
     while(1) {
@@ -923,13 +944,13 @@ bool parse_expr_postfix(Parser *parser, Lexer *lex, Module *module, Function *fu
                         if(lex->token == TOKEN_CPAREN) break;
                         if(!lexer_expect_token(lex, TOKEN_COMMA)) return false;
                     }
-                    add_inst_to_function(func, make_inst(OP_CALL, argc, HERE()), module);
+                    add_inst_to_function(func, make_inst(OP_CALL, argc, loc), module);
                 } break;
             case TOKEN_OBRACKET:
                 {
                     if(!parse_expr(parser, lex, module, func)) return false;
                     if(!lexer_get_and_expect_token(lex, TOKEN_CBRACKET)) return false;
-                    add_inst_to_function(func, make_inst(OP_GET_ITEM, 0, HERE()), module);
+                    add_inst_to_function(func, make_inst(OP_GET_ITEM, 0, loc), module);
                 } break;
             default:
                 lex->parse_point = savedp;
@@ -942,12 +963,22 @@ bool parse_expr_postfix(Parser *parser, Lexer *lex, Module *module, Function *fu
 
 bool parse_expr_unary(Parser *parser, Lexer *lex, Module *module, Function *func)
 {
-    if(!parse_expr_postfix(parser, lex, module, func)) return false;
+    ParsePoint savedp = lex->parse_point;
+    if(!lexer_get_token(lex)) return false;
+    Loc loc = lexer_loc(lex);
+    if(lex->token == TOKEN_NOT) {
+        if(!parse_expr_unary(parser, lex, module, func)) return false;
+        add_inst_to_function(func, make_inst(OP_NOT, 0, loc), module);
+    } else {
+        lex->parse_point = savedp;
+        if(!parse_expr_postfix(parser, lex, module, func)) return false;
+    }
     return true;
 }
 
 bool parse_expr_binop1(Parser *parser, Lexer *lex, Module *module, Function *func)
 {
+    Loc loc = lexer_loc(lex);
     if(!parse_expr_unary(parser, lex, module, func)) return false;
     while(1) {
         ParsePoint savedp = lex->parse_point;
@@ -963,12 +994,13 @@ bool parse_expr_binop1(Parser *parser, Lexer *lex, Module *module, Function *fun
                 return true;
         }
         if(!parse_expr_unary(parser, lex, module, func)) return false;
-        add_inst_to_function(func, make_inst(op, 0, HERE()), module);
+        add_inst_to_function(func, make_inst(op, 0, loc), module);
     }
 }
 
 bool parse_expr_binop2(Parser *parser, Lexer *lex, Module *module, Function *func)
 {
+    Loc loc = lexer_loc(lex);
     if(!parse_expr_binop1(parser, lex, module, func)) return false;
     while(1) {
         ParsePoint savedp = lex->parse_point;
@@ -987,12 +1019,13 @@ bool parse_expr_binop2(Parser *parser, Lexer *lex, Module *module, Function *fun
                 return true;
         }
         if(!parse_expr_binop1(parser, lex, module, func)) return false;
-        add_inst_to_function(func, make_inst(op, 0, HERE()), module);
+        add_inst_to_function(func, make_inst(op, 0, loc), module);
     }
 }
 
 bool parse_expr_binop3(Parser *parser, Lexer *lex, Module *module, Function *func)
 {
+    Loc loc = lexer_loc(lex);
     if(!parse_expr_binop2(parser, lex, module, func)) return false;
     while(1) {
         ParsePoint savedp = lex->parse_point;
@@ -1017,12 +1050,13 @@ bool parse_expr_binop3(Parser *parser, Lexer *lex, Module *module, Function *fun
                 return true;
         }
         if(!parse_expr_binop2(parser, lex, module, func)) return false;
-        add_inst_to_function(func, make_inst(op, 0, HERE()), module);
+        add_inst_to_function(func, make_inst(op, 0, loc), module);
     }
 }
 
 bool parse_expr_binop4(Parser *parser, Lexer *lex, Module *module, Function *func)
 {
+    Loc loc = lexer_loc(lex);
     if(!parse_expr_binop3(parser, lex, module, func)) return false;
     while(1) {
         ParsePoint savedp = lex->parse_point;
@@ -1041,12 +1075,13 @@ bool parse_expr_binop4(Parser *parser, Lexer *lex, Module *module, Function *fun
                 return true;
         }
         if(!parse_expr_binop3(parser, lex, module, func)) return false;
-        add_inst_to_function(func, (make_inst(op, 0, HERE())), module);
+        add_inst_to_function(func, (make_inst(op, 0, loc)), module);
     }
 }
 
 bool parse_expr_binop5(Parser *parser, Lexer *lex, Module *module, Function *func)
 {
+    Loc loc = lexer_loc(lex);
     if(!parse_expr_binop4(parser, lex, module, func)) return false;
     while(1) {
         ParsePoint savedp = lex->parse_point;
@@ -1062,12 +1097,13 @@ bool parse_expr_binop5(Parser *parser, Lexer *lex, Module *module, Function *fun
                 return true;
         }
         if(!parse_expr_binop4(parser, lex, module, func)) return false;
-        add_inst_to_function(func, (make_inst(op, 0, HERE())), module);
+        add_inst_to_function(func, (make_inst(op, 0, loc)), module);
     }
 }
 
 bool parse_expr_binop6(Parser *parser, Lexer *lex, Module *module, Function *func)
 {
+    Loc loc = lexer_loc(lex);
     if(!parse_expr_binop5(parser, lex, module, func)) return false;
     while(1) {
         ParsePoint savedp = lex->parse_point;
@@ -1083,7 +1119,7 @@ bool parse_expr_binop6(Parser *parser, Lexer *lex, Module *module, Function *fun
                 return true;
         }
         if(!parse_expr_binop5(parser, lex, module, func)) return false;
-        add_inst_to_function(func, (make_inst(op, 0, HERE())), module);
+        add_inst_to_function(func, (make_inst(op, 0, loc)), module);
     }
 }
 
@@ -1096,13 +1132,14 @@ bool parse_expr(Parser *parser, Lexer *lex, Module *module, Function *func)
 bool parse_block(Parser *parser, Lexer *lex, Module *module, Function *func);
 bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
 {
+    Loc loc = lexer_loc(lex);
     ParsePoint savedp = lex->parse_point;
     if(!lexer_get_token(lex)) return false;
     switch(lex->token) {
         case TOKEN_RETURN:
             {
                 if(!parse_expr(parser, lex, module, func)) return false;
-                add_inst_to_function(func, make_inst( OP_RET, 0, HERE()), module);
+                add_inst_to_function(func, make_inst(OP_RET, 0, loc), module);
             } break;
         case TOKEN_FUN:
             {
@@ -1147,8 +1184,8 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                     //       name consider using Parser's prog_arena for
                     //       name that's in the scope's name table
                     scope_setvar(parser, newfunc->name, local_slot);
-                    add_inst_to_function(newfunc, make_inst(OP_PUSH_FUNC, new_func_id, HERE()), module);
-                    add_inst_to_function(newfunc, make_inst(OP_LOCAL_SET, local_slot, HERE()), module);
+                    add_inst_to_function(newfunc, make_inst(OP_PUSH_FUNC, new_func_id, loc), module);
+                    add_inst_to_function(newfunc, make_inst(OP_LOCAL_SET, local_slot, loc), module);
                 }
 
                 if(!lexer_get_and_expect_token(lex, TOKEN_OCURLY)) return false;
@@ -1173,8 +1210,8 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                     //       name consider using Parser's prog_arena for
                     //       name that's in the scope's name table
                     scope_setvar(parser, newfunc->name, local_slot);
-                    add_inst_to_function(func, make_inst( OP_PUSH_FUNC, new_func_id, HERE()), module);
-                    add_inst_to_function(func, make_inst( OP_LOCAL_SET, local_slot, HERE()), module);
+                    add_inst_to_function(func, make_inst( OP_PUSH_FUNC, new_func_id, loc), module);
+                    add_inst_to_function(func, make_inst( OP_LOCAL_SET, local_slot, loc), module);
                 }
             } break;
         case TOKEN_VAR:
@@ -1191,7 +1228,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                 scope_setvar(parser, name, local_slot);
                 if(!lexer_get_and_expect_token(lex, TOKEN_EQ)) return false;
                 if(!parse_expr(parser, lex, module, func)) return false;
-                add_inst_to_function(func, make_inst(OP_LOCAL_SET, local_slot, HERE()), module);
+                add_inst_to_function(func, make_inst(OP_LOCAL_SET, local_slot, loc), module);
             } break;
         case TOKEN_WHILE:
             {
@@ -1302,7 +1339,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                     }
                     size_t local_slot = scope_getvar(parser, name);
                     if(!parse_expr(parser, lex, module, func)) return false;
-                    add_inst_to_function(func, make_inst(OP_LOCAL_SET, local_slot , HERE()), module);
+                    add_inst_to_function(func, make_inst(OP_LOCAL_SET, local_slot, HERE()), module);
                 } else {
                     Token tok = lex->token;
                     lex->parse_point = savedp;
@@ -1342,7 +1379,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                     ParsePoint savedp = lex->parse_point;
                     if(!lexer_get_token(lex)) return false;
                     if(lex->token != TOKEN_COMMA) {
-                        add_inst_to_function(func, make_inst(OP_PRINT, n , HERE()), module);
+                        add_inst_to_function(func, make_inst(OP_PRINT, n, HERE()), module);
                         lex->parse_point = savedp;
                         break;
                     }
@@ -1467,6 +1504,13 @@ void f_len(Yue_Context *ctx, Yue_Call_Info *info)
     info->retc = 1;
 }
 
+void f_putchar(Yue_Context *ctx, Yue_Call_Info *info)
+{
+    ASSERT(info->argc == 1 && "len expect more than 1 arguments");
+    ASSERT(info->argv[0].kind == YUE_VALUE_INT);
+    putchar(info->argv[0].intv);
+}
+
 /// Context implementation
 
 struct Yue_Context {
@@ -1563,6 +1607,7 @@ int main(int argc, char *argv[])
     yue_set_global_value(ctx, "false", (Yue_Value){ .kind = YUE_VALUE_INT, .intv = 0 });
     yue_set_global_value(ctx, "rand_range", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_rand_range });
     yue_set_global_value(ctx, "append", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_append });
+    yue_set_global_value(ctx, "putchar", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_putchar });
     yue_set_global_value(ctx, "len", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_len });
 
     if(!parse_program(&ctx->parser, &ctx->lexer, &module)) return -1;

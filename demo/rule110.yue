@@ -1,0 +1,65 @@
+var buf_a = []
+var buf_b = []
+
+var N = 25
+var i = 0
+while(i < N) {
+    if(i + 1 == N) {
+        append(buf_a, true)
+        append(buf_b, true)
+    } else {
+        append(buf_a, false)
+        append(buf_b, false)
+    }
+    i = i + 1
+}
+
+fun print_buf(buf, n) {
+    var k = 0
+    while(k < n) {
+        if(buf[k]) {
+            putchar('*')
+        } else {
+            putchar(' ')
+        }
+        k = k + 1
+    }
+    putchar(10)
+    
+}
+
+var p_gen = 0
+var n_gen = 100
+while(p_gen < n_gen) {
+    print_buf(buf_a, N)
+    var j = 1
+    while(j < N - 1) {
+        var l = buf_a[j - 1]
+        var c = buf_a[j]
+        var r = buf_a[j + 1]
+        if(l && c && r) { // 111
+            buf_b[j] = false
+        } else if(l && c && !r) { // 110
+            buf_b[j] = true
+        } else if(l && !c && r) { // 101
+            buf_b[j] = true
+        } else if(l && !c && !r) { // 100
+            buf_b[j] = false
+        } else if(!l && c && r) { // 011
+            buf_b[j] = true
+        } else if(!l && c && !r) { // 010
+            buf_b[j] = true
+        } else if(!l && !c &&  r) { // 001
+            buf_b[j] = true
+        } else if(!l && !c && !r) { // 000
+            buf_b[j] = false
+        } else {
+        }
+        j = j + 1
+    }
+    var tmp = buf_a
+    buf_a = buf_b
+    buf_b = tmp
+    p_gen = p_gen + 1
+}
+
