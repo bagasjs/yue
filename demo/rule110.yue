@@ -7,6 +7,9 @@ while(i < N) {
     if(i + 1 == N) {
         append(buf_a, true)
         append(buf_b, true)
+    } else if(i + 3 == N) {
+        append(buf_a, true)
+        append(buf_b, true)
     } else {
         append(buf_a, false)
         append(buf_b, false)

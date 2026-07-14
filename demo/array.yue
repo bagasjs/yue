@@ -1,8 +1,11 @@
-var xs = []
-var ys = []
-append(xs, ys)
-append(xs, 1)
-append(ys, 69)
+var ys = [ 69 ]
+var xs = [ ys, 1 ]
+
+// var xs = []
+// var ys = []
+// append(xs, ys)
+// append(xs, 1)
+// append(ys, 69)
 
 print(xs[0][0])
 xs[0][0] = 420

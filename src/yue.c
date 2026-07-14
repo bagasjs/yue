@@ -407,12 +407,17 @@ Yue_Object *runtime_pushnewstring(Runtime *runtime, CallFrame *frame, const char
     return (Yue_Object*)obj;
 }
 
-Yue_Object *runtime_pushnewarray(Runtime *runtime, CallFrame *frame)
+Yue_Object *runtime_pushnewarray(Runtime *runtime, CallFrame *frame, size_t slurp_n)
 {
     Yue_Object_Array *obj = (Yue_Object_Array*)runtime_newobject(runtime, YUE_OBJECT_ARRAY, sizeof(Yue_Object_Array));
     obj->array.count    = 0;
     obj->array.capacity = 0;
     obj->array.items    = 0;
+    for(size_t i = 0; i < slurp_n; ++i) {
+        Yue_Value val = frame->stack[frame->sp - slurp_n + i];
+        da_append(&obj->array, val);
+    }
+    frame->sp -= slurp_n;
     frame->stack[frame->sp++] = ((Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj });
     return (Yue_Object*)obj;
 }
@@ -529,7 +534,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                 runtime_pushnewstring(runtime, frame, &module->strconsts.items[inst.arg]);
                 break;
             case OP_NEW_ARRAY:
-                runtime_pushnewarray(runtime, frame);
+                runtime_pushnewarray(runtime, frame, inst.arg);
                 break;
             case OP_NEW_TABLE:
                 runtime_push_new_table(runtime, frame);
@@ -902,9 +907,21 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
         } break;
     case TOKEN_OBRACKET:
         {
-            if(!lexer_get_and_expect_token(lex, TOKEN_CBRACKET)) return false;
+            size_t count = 0;
+            ParsePoint savedp = lex->parse_point;
+            if(!lexer_get_token(lex)) return false;
+            if(lex->token != TOKEN_CBRACKET) {
+                lex->parse_point = savedp;
+                for(;;) {
+                    if(!parse_expr(parser, lex, module, func)) return false;
+                    count += 1;
+                    if(!lexer_get_token(lex)) return false;
+                    if(lex->token == TOKEN_CBRACKET) break;
+                    if(!lexer_expect_token(lex, TOKEN_COMMA)) return false;
+                }
+            }
             add_inst_to_function(func, 
-                    make_inst(OP_NEW_ARRAY, 0, loc),
+                    make_inst(OP_NEW_ARRAY, count, loc),
                     module);
         } break;
     case TOKEN_OCURLY:
@@ -1619,10 +1636,8 @@ int main(int argc, char *argv[])
 }
 
 /// TODOs:
-/// 1. We're not supporting array literal syntax yet `var arr = [1,2,3,4,5]`
-/// 2. Table feature
-///     a. Table field indexing syntax `person["name"]`
-///     b. Table field access syntax `person.name`
-///     c. Table literal syntax `{ "name": "foo" }`
-///     d. How do I iterate table?
-/// 3. Better Embedding API
+/// 1. Table feature
+///     a. Table field access syntax `person.name`
+///     b. Table literal syntax `{ "name": "foo" }`
+///     c. How do I iterate table?
+/// 2. Better Embedding API
