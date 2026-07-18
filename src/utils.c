@@ -132,14 +132,6 @@ size_t cstrlen(const char *cstr)
     return n;
 }
 
-size_t cstrsz(const char *cstr)
-{
-    size_t n = 0;
-    while(cstr[n++] != 0);
-    n++; // The zero terminator
-    return n;
-}
-
 bool cstrneq(const char *a, size_t a_len, const char *b, size_t b_len)
 {
     if(a_len != b_len) return false;

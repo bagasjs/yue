@@ -401,8 +401,11 @@ Yue_Object *runtime_pushnewstring(Runtime *runtime, CallFrame *frame, const char
     obj->string.count    = 0;
     obj->string.capacity = 0;
     obj->string.items    = 0;
-    if(init_text) 
-        da_append_many(&obj->string, init_text, cstrsz(init_text));
+    if(init_text) {
+        da_append_many(&obj->string, init_text, cstrlen(init_text));
+        da_append(&obj->string, 0);
+    }
+
     frame->stack[frame->sp++] = ((Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj });
     return (Yue_Object*)obj;
 }
@@ -432,7 +435,7 @@ Yue_Object *runtime_push_new_table(Runtime *runtime, CallFrame *frame)
     return (Yue_Object*)obj;
 }
 
-void print_value(Yue_Value *values, size_t count)
+void print_value(Yue_Value *values, size_t count, const char *endline)
 {
     for(size_t i = 0; i < count; ++i) {
         if(i != 0) printf(" ");
@@ -468,8 +471,15 @@ void print_value(Yue_Value *values, size_t count)
                             } break;
                         case YUE_OBJECT_TABLE:
                             {
-                                Yue_Object_Table *table = (Yue_Object_Table*)a.objv;
-                                printf("<table[%zu]>", table->table.count);
+
+                                Yue_Table table = ((Yue_Object_Table*)a.objv)->table;
+                                printf("{ ");
+                                for(size_t i = 0; i < table.count; ++i) {
+                                    Yue_Table_Entry entry = table.items[i];
+                                    print_value(&entry.key, 1, " : ");
+                                    print_value(&entry.value, 1, ", ");
+                                }
+                                printf("}");
                             } break;
                         default:
                             ASSERT(0 && "Unreachable");
@@ -481,14 +491,14 @@ void print_value(Yue_Value *values, size_t count)
                 break;
         }
     }
-    printf("\n");
+    if(endline) printf("%s", endline);
 }
 
 bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *args, size_t argc, Yue_Value *retval)
 {
     size_t pc = 0;
     int print_iter = 0;
-    const int PRINT_CAP = 0;
+    const int PRINT_CAP = 100;
 
     size_t frame_ptr = runtime->call_frames.count;
     sa_append(&runtime->call_frames, ((CallFrame){0}));
@@ -511,7 +521,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
             printf("CURRENT STACK:\n");
             for(size_t i = 0; i < frame->sp; ++i) {
                 Yue_Value a = frame->stack[i];
-                print_value(&a, 1);
+                print_value(&a, 1, "\n");
             }
             printf("------------------\n");
             printf("[%zu] %s %d\n", pc, opcode_names[inst.opcode], inst.arg);
@@ -760,7 +770,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                     }
                     Yue_Value *start = &frame->stack[frame->sp - inst.arg];
                     frame->sp -= inst.arg;
-                    print_value(start, inst.arg);
+                    print_value(start, inst.arg, "\n");
                 } break;
             default:
                 ASSERT(0 && "Not implemented or Unreachable");
@@ -880,7 +890,8 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
     case TOKEN_STRING_LIT:
         {
             int arg = module->strconsts.count;
-            da_append_many(&module->strconsts, lex->string, cstrsz(lex->string));
+            da_append_many(&module->strconsts, lex->string, cstrlen(lex->string));
+            da_append(&module->strconsts, 0);
             add_inst_to_function(func, 
                     make_inst(OP_PUSH_STR, arg, loc),
                     module);
@@ -969,6 +980,11 @@ bool parse_expr_postfix(Parser *parser, Lexer *lex, Module *module, Function *fu
                     if(!lexer_get_and_expect_token(lex, TOKEN_CBRACKET)) return false;
                     add_inst_to_function(func, make_inst(OP_GET_ITEM, 0, loc), module);
                 } break;
+            /*case TOKEN_DOT:*/
+            /*    {*/
+            /*        if(!lexer_get_and_expect_token(lex, TOKEN_ID)) return false;*/
+            /*        add_inst_to_function(func, make_inst(OP_GET_ITEM, 0, loc), module);*/
+            /*    } break;*/
             default:
                 lex->parse_point = savedp;
                 return true;

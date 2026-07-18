@@ -1,21 +1,22 @@
-var buf_a = []
-var buf_b = []
+var buf_a = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0]
+var buf_b = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+var N     = len(buf_a)
 
-var N = 25
-var i = 0
-while(i < N) {
-    if(i + 1 == N) {
-        append(buf_a, true)
-        append(buf_b, true)
-    } else if(i + 3 == N) {
-        append(buf_a, true)
-        append(buf_b, true)
-    } else {
-        append(buf_a, false)
-        append(buf_b, false)
-    }
-    i = i + 1
-}
+// var N = 25
+// var i = 0
+// while(i < N) {
+//     if(i + 1 == N) {
+//         append(buf_a, true)
+//         append(buf_b, true)
+//     } else if(i + 3 == N) {
+//         append(buf_a, true)
+//         append(buf_b, true)
+//     } else {
+//         append(buf_a, false)
+//         append(buf_b, false)
+//     }
+//     i = i + 1
+// }
 
 fun print_buf(buf, n) {
     var k = 0
