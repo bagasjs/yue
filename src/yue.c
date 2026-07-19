@@ -211,6 +211,11 @@ Yue_String *yue_to_string(Yue_Value value)
     return &str->string;
 }
 
+void yue_array_append(Yue_Array *array, Yue_Value value)
+{
+    da_append(array, value);
+}
+
 void yue_table_setitem(Yue_Table *table, Yue_Value keyv, Yue_Value value)
 {
     Yue_String *key = yue_to_string(keyv);
@@ -418,7 +423,7 @@ Yue_Object *runtime_pushnewarray(Runtime *runtime, CallFrame *frame, size_t slur
     obj->array.items    = 0;
     for(size_t i = 0; i < slurp_n; ++i) {
         Yue_Value val = frame->stack[frame->sp - slurp_n + i];
-        da_append(&obj->array, val);
+        yue_array_append(&obj->array, val);
     }
     frame->sp -= slurp_n;
     frame->stack[frame->sp++] = ((Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj });
@@ -435,7 +440,7 @@ Yue_Object *runtime_push_new_table(Runtime *runtime, CallFrame *frame)
     return (Yue_Object*)obj;
 }
 
-void print_value(Yue_Value *values, size_t count, const char *endline)
+void print_value(Yue_Value *values, size_t count, const char *endline, int level)
 {
     for(size_t i = 0; i < count; ++i) {
         if(i != 0) printf(" ");
@@ -462,12 +467,21 @@ void print_value(Yue_Value *values, size_t count, const char *endline)
                         case YUE_OBJECT_STRING:
                             {
                                 Yue_Object_String *str = (Yue_Object_String*)a.objv;
-                                printf("%.*s", (int)str->string.count, str->string.items);
+                                if(level > 0) {
+                                    printf("\"%.*s\"", (int)str->string.count, str->string.items);
+                                } else {
+                                    printf("%.*s", (int)str->string.count, str->string.items);
+                                }
                             } break;
                         case YUE_OBJECT_ARRAY:
                             {
-                                Yue_Object_Array *arr = (Yue_Object_Array*)a.objv;
-                                printf("<array[%zu]>", arr->array.count);
+                                Yue_Array array = ((Yue_Object_Array*)a.objv)->array;
+                                printf("[ ");
+                                for(size_t i = 0; i < array.count; ++i) {
+                                    Yue_Value value = array.items[i];
+                                    print_value(&value, 1, ", ", level + 1);
+                                }
+                                printf("]");
                             } break;
                         case YUE_OBJECT_TABLE:
                             {
@@ -476,8 +490,8 @@ void print_value(Yue_Value *values, size_t count, const char *endline)
                                 printf("{ ");
                                 for(size_t i = 0; i < table.count; ++i) {
                                     Yue_Table_Entry entry = table.items[i];
-                                    print_value(&entry.key, 1, " : ");
-                                    print_value(&entry.value, 1, ", ");
+                                    print_value(&entry.key, 1, " : ", level + 1);
+                                    print_value(&entry.value, 1, ", ", level + 1);
                                 }
                                 printf("}");
                             } break;
@@ -498,7 +512,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
 {
     size_t pc = 0;
     int print_iter = 0;
-    const int PRINT_CAP = 100;
+    const int PRINT_CAP = 0;
 
     size_t frame_ptr = runtime->call_frames.count;
     sa_append(&runtime->call_frames, ((CallFrame){0}));
@@ -521,7 +535,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
             printf("CURRENT STACK:\n");
             for(size_t i = 0; i < frame->sp; ++i) {
                 Yue_Value a = frame->stack[i];
-                print_value(&a, 1, "\n");
+                print_value(&a, 1, "\n", 0);
             }
             printf("------------------\n");
             printf("[%zu] %s %d\n", pc, opcode_names[inst.opcode], inst.arg);
@@ -770,7 +784,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                     }
                     Yue_Value *start = &frame->stack[frame->sp - inst.arg];
                     frame->sp -= inst.arg;
-                    print_value(start, inst.arg, "\n");
+                    print_value(start, inst.arg, "\n", 0);
                 } break;
             default:
                 ASSERT(0 && "Not implemented or Unreachable");
@@ -980,11 +994,15 @@ bool parse_expr_postfix(Parser *parser, Lexer *lex, Module *module, Function *fu
                     if(!lexer_get_and_expect_token(lex, TOKEN_CBRACKET)) return false;
                     add_inst_to_function(func, make_inst(OP_GET_ITEM, 0, loc), module);
                 } break;
-            /*case TOKEN_DOT:*/
-            /*    {*/
-            /*        if(!lexer_get_and_expect_token(lex, TOKEN_ID)) return false;*/
-            /*        add_inst_to_function(func, make_inst(OP_GET_ITEM, 0, loc), module);*/
-            /*    } break;*/
+            case TOKEN_DOT:
+                {
+                    if(!lexer_get_and_expect_token(lex, TOKEN_ID)) return false;
+                    int arg = module->strconsts.count;
+                    da_append_many(&module->strconsts, lex->string, cstrlen(lex->string));
+                    da_append_many(&module->strconsts, lex->string, cstrlen(lex->string));
+                    add_inst_to_function(func, make_inst(OP_PUSH_STR, arg, loc), module);
+                    add_inst_to_function(func, make_inst(OP_GET_ITEM, 0, loc), module);
+                } break;
             default:
                 lex->parse_point = savedp;
                 return true;
@@ -1377,6 +1395,19 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                     Token tok = lex->token;
                     lex->parse_point = savedp;
                     switch(tok) {
+                    case TOKEN_DOT:
+                        {
+                            if(!parse_expr_primary(parser, lex, module, func)) return false;
+                            if(!lexer_get_and_expect_token(lex, TOKEN_DOT)) return false;
+                            if(!lexer_get_and_expect_token(lex, TOKEN_ID)) return false;
+                            int arg = module->strconsts.count;
+                            da_append_many(&module->strconsts, lex->string, cstrlen(lex->string));
+                            da_append_many(&module->strconsts, lex->string, cstrlen(lex->string));
+                            add_inst_to_function(func, make_inst(OP_PUSH_STR, arg, loc), module);
+                            if(!lexer_get_and_expect_token(lex, TOKEN_EQ)) return false;
+                            if(!parse_expr(parser, lex, module, func)) return false;
+                            add_inst_to_function(func, make_inst(OP_SET_ITEM, 0, HERE()), module);
+                        } break;
                     case TOKEN_OBRACKET:
                         {
                             // TODO: we only support xs[0], how about xs[0][1] ??
@@ -1520,7 +1551,7 @@ void f_append(Yue_Context *ctx, Yue_Call_Info *info)
     ASSERT(arrv.objv->kind == YUE_OBJECT_ARRAY);
 
     Yue_Object_Array *arr = (Yue_Object_Array*)arrv.objv;
-    da_append(&arr->array, newv);
+    yue_array_append(&arr->array, newv);
     info->retc = 0;
 }
 
@@ -1593,6 +1624,37 @@ int yue_get_global_value(Yue_Context *ctx, const char *name, Yue_Value *value)
     return 0;
 }
 
+Yue_Value yue_new_string(Yue_Context *ctx, const char *init_text)
+{
+
+    Yue_Object_String *obj = (Yue_Object_String*)runtime_newobject(&ctx->runtime, YUE_OBJECT_STRING, sizeof(Yue_Object_String));
+    obj->string.count    = 0;
+    obj->string.capacity = 0;
+    obj->string.items    = 0;
+    if(init_text) {
+        da_append_many(&obj->string, init_text, cstrlen(init_text));
+        da_append(&obj->string, 0);
+    }
+    Yue_Value value = (Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj };
+    return value;
+}
+
+Yue_Value yue_new_array(Yue_Context *ctx)
+{
+    Yue_Object_Array *obj = (Yue_Object_Array*)runtime_newobject(&ctx->runtime, YUE_OBJECT_ARRAY, sizeof(Yue_Object_Array));
+    obj->array.count    = 0;
+    obj->array.capacity = 0;
+    obj->array.items    = 0;
+    Yue_Value value = (Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj };
+    return value;
+}
+
+Yue_Array *yue_to_array(Yue_Value value)
+{
+    Yue_Object_Array *obj = (Yue_Object_Array*)value.objv;
+    return &obj->array;
+}
+
 int main(int argc, char *argv[]) 
 {
     StringBuilder source = {0};
@@ -1635,6 +1697,15 @@ int main(int argc, char *argv[])
 
     Yue_Context *ctx = yue_open();
     ctx->lexer = lexer_new(source_filepath, source.items, source.items + source.count);
+
+    Yue_Value args_v = yue_new_array(ctx);
+    Yue_Array *args = yue_to_array(args_v);
+
+    for(int i = 1; i < argc; ++i) {
+        yue_array_append(args, yue_new_string(ctx, argv[i]));
+    }
+
+    yue_set_global_value(ctx, "ARGS",  args_v);
     yue_set_global_value(ctx, "nil",   (Yue_Value){ .kind = YUE_VALUE_NIL });
     yue_set_global_value(ctx, "true",  (Yue_Value){ .kind = YUE_VALUE_INT, .intv = 1 });
     yue_set_global_value(ctx, "false", (Yue_Value){ .kind = YUE_VALUE_INT, .intv = 0 });

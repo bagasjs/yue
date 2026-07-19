@@ -84,6 +84,7 @@ Yue_Value yue_new_string(Yue_Context *ctx, const char *init_text);
 Yue_Value yue_new_array(Yue_Context *ctx);
 
 Yue_String *yue_to_string(Yue_Value value);
+Yue_Array  *yue_to_array(Yue_Value value);
 
 /// Object Operations (yue_objects.c)
 void yue_array_append(Yue_Array *array, Yue_Value item);
