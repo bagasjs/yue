@@ -1,0 +1,9 @@
+var friend = {}
+friend.name = "Bar";
+
+var person = {}
+person.name = "Foo";
+person.friend = friend
+person.friend.name = "Yue"
+
+print(person.friend)

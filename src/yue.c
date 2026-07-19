@@ -1427,45 +1427,6 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                     if(!lexer_get_and_expect_token(lex, TOKEN_EQ)) return false;
                     if(!parse_expr(parser, lex, module, func)) return false;
                     add_inst_to_function(func, make_inst(OP_SET_ITEM, 0, HERE()), module);
-
-                    /*switch(tok) {*/
-                    /*case TOKEN_DOT:*/
-                    /*    {*/
-                    /*        if(!parse_expr_primary(parser, lex, module, func)) return false;*/
-                    /*        if(!lexer_get_and_expect_token(lex, TOKEN_DOT)) return false;*/
-                    /*        if(!lexer_get_and_expect_token(lex, TOKEN_ID)) return false;*/
-                    /*        int arg = module->strconsts.count;*/
-                    /*        da_append_many(&module->strconsts, lex->string, cstrlen(lex->string));*/
-                    /*        da_append(&module->strconsts, 0);*/
-                    /*        add_inst_to_function(func, make_inst(OP_PUSH_STR, arg, loc), module);*/
-                    /*        if(!lexer_get_and_expect_token(lex, TOKEN_EQ)) return false;*/
-                    /*        if(!parse_expr(parser, lex, module, func)) return false;*/
-                    /*        add_inst_to_function(func, make_inst(OP_SET_ITEM, 0, HERE()), module);*/
-                    /*    } break;*/
-                    /*case TOKEN_OBRACKET:*/
-                    /*    {*/
-                    /*        // TODO: we only support xs[0], how about xs[0][1] ??*/
-                    /*        if(!parse_expr_primary(parser, lex, module, func)) return false;*/
-                    /*        while(1) {*/
-                    /*            if(!lexer_get_and_expect_token(lex, TOKEN_OBRACKET)) return false;*/
-                    /*            if(!parse_expr(parser, lex, module, func)) return false;*/
-                    /*            if(!lexer_get_and_expect_token(lex, TOKEN_CBRACKET)) return false;*/
-                    /**/
-                    /*            ParsePoint savedp = lex->parse_point;*/
-                    /*            if(!lexer_get_token(lex)) return false;*/
-                    /*            Token next_token = lex->token;*/
-                    /*            lex->parse_point = savedp;*/
-                    /*            if(next_token != TOKEN_OBRACKET) break;*/
-                    /*            add_inst_to_function(func, make_inst(OP_GET_ITEM, 0, HERE()), module);*/
-                    /*        }*/
-                    /*        if(!lexer_get_and_expect_token(lex, TOKEN_EQ)) return false;*/
-                    /*        if(!parse_expr(parser, lex, module, func)) return false;*/
-                    /*        add_inst_to_function(func, make_inst(OP_SET_ITEM, 0, HERE()), module);*/
-                    /*    } break;*/
-                    /*default:*/
-                    /*    if(!parse_expr(parser, lex, module, func)) return false;*/
-                    /*    break;*/
-                    /*}*/
                 }
             } break;
         case TOKEN_PRINT:
