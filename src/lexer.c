@@ -303,6 +303,10 @@ bool lexer_get_token(Lexer *lex)
             lexer_skip_until(lex, "\n");
             continue;
         }
+        if(lexer_skip_prefix(lex, "#")) {
+            lexer_skip_until(lex, "\n");
+            continue;
+        }
 
         if(lexer_skip_prefix(lex, "/*")) {
             lexer_skip_until(lex, "*/");
