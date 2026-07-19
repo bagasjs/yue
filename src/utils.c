@@ -114,25 +114,26 @@ size_t arena_get_usage(Arena *a)
     return result;
 }
 
-bool cstreq(const char *a, const char *b)
+int cstrcmp(const char *a, const char *b)
 {
     size_t i = 0;
     while(true) {
-        if(a[i] != b[i]) return false;
+        int c = a[i] - b[i];
+        if(c != 0) return c;
         if(a[i] == 0) break; 
         i += 1;
     }
-    return true;
+    return 0;
 }
 
 size_t cstrlen(const char *cstr)
 {
     size_t n = 0;
-    while(cstr[n++] != 0);
+    for(; cstr[n] != 0; ++n);
     return n;
 }
 
-bool cstrneq(const char *a, size_t a_len, const char *b, size_t b_len)
+bool cstreq(const char *a, size_t a_len, const char *b, size_t b_len)
 {
     if(a_len != b_len) return false;
     for(size_t i = 0; i < a_len; ++i) {
