@@ -1560,14 +1560,20 @@ void f_append(Yue_Context *ctx, Yue_Call_Info *info)
 void f_len(Yue_Context *ctx, Yue_Call_Info *info) 
 {
     ASSERT(info->argc >= 1 && "len expect more than 1 arguments");
-    Yue_Value arrv = info->argv[0];
-    Yue_Value newv = info->argv[1];
-    ASSERT(arrv.kind == YUE_VALUE_OBJ);
-    ASSERT(arrv.objv->kind == YUE_OBJECT_ARRAY);
+    Yue_Value val  = info->argv[0];
+    ASSERT(val.kind == YUE_VALUE_OBJ);
+    if(val.objv->kind == YUE_OBJECT_ARRAY) {
+        Yue_Object_Array *arr = (Yue_Object_Array*)val.objv;
+        info->retv = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = arr->array.count, };
+        info->retc = 1;
+    } else if (val.objv->kind == YUE_OBJECT_STRING) {
+        Yue_Object_String *str = (Yue_Object_String*)val.objv;
+        info->retv = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = str->string.count - 1, };
+        info->retc = 1;
+    } else {
+        ASSERT(val.objv->kind == YUE_OBJECT_ARRAY || val.objv->kind == YUE_OBJECT_STRING);
+    }
 
-    Yue_Object_Array *arr = (Yue_Object_Array*)arrv.objv;
-    info->retv = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = arr->array.count, };
-    info->retc = 1;
 }
 
 void f_putchar(Yue_Context *ctx, Yue_Call_Info *info)
@@ -1729,3 +1735,4 @@ int main(int argc, char *argv[])
 ///     b. Table literal syntax `{ "name": "foo" }`
 ///     c. How do I iterate table?
 /// 2. Better Embedding API
+/// 3. Currently string is kinda sucks, its count might include null term or might not include

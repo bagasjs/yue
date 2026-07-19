@@ -1,5 +1,6 @@
 # Yue
-A small scripting language
+A small scripting language.
+I promise anything in ./src will never be more than 5k LoC okay.
 
 ## Features
 1. Small 
