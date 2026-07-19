@@ -1380,6 +1380,9 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
             } break;
         case TOKEN_ID:
             {
+                // NOTE: This is a lot of hacks, we need a way to have lvalue seriously
+                //       OP_LOCAL_SET maybe should not be accepting the slot via arg rather
+                //       via the stack
                 const char *name = arena_strdup(parser->prog_arena, lex->string);
                 if(!lexer_get_token(lex)) return false;
                 if(lex->token == TOKEN_EQ) {
@@ -1392,6 +1395,10 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                     size_t local_slot = scope_getvar(parser, name);
                     if(!parse_expr(parser, lex, module, func)) return false;
                     add_inst_to_function(func, make_inst(OP_LOCAL_SET, local_slot, HERE()), module);
+                } else if(lex->token == TOKEN_OPAREN) {
+                    // NOTE: This is a hack, because without this branch we can't call a function
+                    lex->parse_point = savedp;
+                    if(!parse_expr(parser, lex, module, func)) return false;
                 } else {
                     Token tok = lex->token;
                     lex->parse_point = savedp;
