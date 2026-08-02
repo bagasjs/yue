@@ -17,6 +17,7 @@ typedef enum Op {
     OP_ADD,
     OP_SUB,
     OP_MUL,
+    OP_MOD,
     OP_EQ,
     OP_NE,
     OP_GT,
@@ -687,8 +688,9 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                 } break;
 
             case OP_ADD:
-            case OP_MUL:
             case OP_SUB:
+            case OP_MUL:
+            case OP_MOD:
             case OP_EQ:
             case OP_NE:
             case OP_GT:
@@ -710,6 +712,9 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                         break;
                     case OP_MUL:
                         b.intv *= a.intv;
+                        break;
+                    case OP_MOD:
+                        b.intv  = b.intv % a.intv;
                         break;
                     case OP_EQ:
                         b.intv  = b.intv == a.intv;
@@ -792,6 +797,9 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                 break;
         }
     }
+
+    sa_pop(&runtime->call_frames);
+
     return true;
 }
 
@@ -1037,6 +1045,9 @@ bool parse_expr_binop1(Parser *parser, Lexer *lex, Module *module, Function *fun
         if(!lexer_get_token(lex)) return false;
         Opcode op = {0};
         switch(lex->token) {
+            case TOKEN_MOD:
+                op = OP_MOD;
+                break;
             case TOKEN_MUL:
                 op = OP_MUL;
                 break;
@@ -1734,5 +1745,6 @@ int main(int argc, char *argv[])
 /// 1. Table feature
 ///     b. Table literal syntax `{ "name": "foo" }`
 ///     c. How do I iterate table?
+/// 1. Better error information
 /// 2. Better Embedding API
 /// 3. Currently string is kinda sucks, its count might include null term or might not include
