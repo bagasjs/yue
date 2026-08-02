@@ -432,12 +432,20 @@ Yue_Object *runtime_pushnewarray(Runtime *runtime, CallFrame *frame, size_t slur
     return (Yue_Object*)obj;
 }
 
-Yue_Object *runtime_push_new_table(Runtime *runtime, CallFrame *frame)
+Yue_Object *runtime_push_new_table(Runtime *runtime, CallFrame *frame, int slurp_n_pairs)
 {
     Yue_Object_Table *obj = (Yue_Object_Table*)runtime_newobject(runtime, YUE_OBJECT_TABLE, sizeof(Yue_Object_Table));
     obj->table.count    = 0;
     obj->table.capacity = 0;
     obj->table.items    = 0;
+    size_t slurp_n = slurp_n_pairs * 2;
+    ASSERT(frame->sp >= slurp_n);
+    for(size_t i = 0; i < slurp_n; i += 2) {
+        Yue_Value key = frame->stack[frame->sp - slurp_n + i];
+        Yue_Value value = frame->stack[frame->sp - slurp_n + i + 1];
+        yue_table_setitem(&obj->table, key, value);
+    }
+    frame->sp -= slurp_n;
     frame->stack[frame->sp++] = ((Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj });
     return (Yue_Object*)obj;
 }
@@ -563,8 +571,9 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                 runtime_pushnewarray(runtime, frame, inst.arg);
                 break;
             case OP_NEW_TABLE:
-                runtime_push_new_table(runtime, frame);
-                break;
+                {
+                    runtime_push_new_table(runtime, frame, inst.arg);
+                } break;
 
             case OP_SET_ITEM:
                 {
@@ -941,28 +950,42 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
         } break;
     case TOKEN_OBRACKET:
         {
-            size_t count = 0;
+            size_t entries_count = 0;
             ParsePoint savedp = lex->parse_point;
             if(!lexer_get_token(lex)) return false;
             if(lex->token != TOKEN_CBRACKET) {
                 lex->parse_point = savedp;
                 for(;;) {
                     if(!parse_expr(parser, lex, module, func)) return false;
-                    count += 1;
+                    entries_count += 1;
                     if(!lexer_get_token(lex)) return false;
                     if(lex->token == TOKEN_CBRACKET) break;
                     if(!lexer_expect_token(lex, TOKEN_COMMA)) return false;
                 }
             }
             add_inst_to_function(func, 
-                    make_inst(OP_NEW_ARRAY, count, loc),
+                    make_inst(OP_NEW_ARRAY, entries_count, loc),
                     module);
         } break;
     case TOKEN_OCURLY:
         {
-            if(!lexer_get_and_expect_token(lex, TOKEN_CCURLY)) return false;
+            size_t pairs_count = 0;
+            ParsePoint savedp = lex->parse_point;
+            if(!lexer_get_token(lex)) return false;
+            if(lex->token != TOKEN_CCURLY) {
+                lex->parse_point = savedp;
+                for(;;) {
+                    if(!parse_expr(parser, lex, module, func)) return false;
+                    if(!lexer_get_and_expect_token(lex, TOKEN_COLON)) return false;
+                    if(!parse_expr(parser, lex, module, func)) return false;
+                    pairs_count += 1;
+                    if(!lexer_get_token(lex)) return false;
+                    if(lex->token == TOKEN_CCURLY) break;
+                    if(!lexer_expect_token(lex, TOKEN_COMMA)) return false;
+                }
+            }
             add_inst_to_function(func, 
-                    make_inst(OP_NEW_TABLE, 0, loc),
+                    make_inst(OP_NEW_TABLE, pairs_count, loc),
                     module);
         } break;
     default:
