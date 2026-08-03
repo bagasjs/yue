@@ -85,10 +85,15 @@ typedef struct {
     Loc    loc;
     Opcode opcode;
     int    arg;
+    int    arg2; // NOTE: used for up value man this is a hack
 } Inst;
 
 static inline Inst make_inst(Opcode opcode, int arg, Loc loc) {
-    return (Inst) { .loc = loc, opcode = opcode, .arg = arg };
+    return (Inst) { .loc = loc, opcode = opcode, .arg = arg, .arg2 = 0 };
+}
+
+static inline Inst make_inst2(Opcode opcode, int arg, int arg2, Loc loc) {
+    return (Inst) { .loc = loc, opcode = opcode, .arg = arg, .arg2 = arg2 };
 }
 
 typedef struct {
@@ -179,6 +184,8 @@ typedef struct Yue_Object_Table {
 
 #define STACK_CAP 1024
 typedef struct CallFrame {
+    const char *fn_name;
+    Loc        trigger_loc; // useful for stack trace
     Yue_Value  locals[1024];
     Yue_Value  stack[STACK_CAP];
 
@@ -527,7 +534,7 @@ void print_value(Yue_Value *values, size_t count, const char *endline, int level
     if(endline) printf("%s", endline);
 }
 
-bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *args, size_t argc, Yue_Value *retval)
+bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *args, size_t argc, Yue_Value *retval, Loc loc)
 {
     size_t pc = 0;
     int print_iter = 0;
@@ -536,9 +543,11 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
     size_t frame_ptr = runtime->call_frames.count;
     sa_append(&runtime->call_frames, ((CallFrame){0}));
     CallFrame *frame = &runtime->call_frames.items[frame_ptr];
+    frame->fn_name = func->name;
+    frame->trigger_loc = loc;
 
     if(argc != func->params_count) {
-        lexer_diagf(func->loc, "Function `%s` expects %zu arguments but got %zu\n", func->params_count, argc);
+        lexer_diagf(loc, "Function `%s` expects %zu arguments but got %zu\n", func->params_count, argc);
         return false;
     }
     for(size_t i = 0; i < argc; ++i) {
@@ -560,7 +569,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                 print_value(&a, 1, "\n", 0);
             }
             printf("------------------\n");
-            printf("[%zu] %s %d\n", pc, opcode_names[inst.opcode], inst.arg);
+            printf("[%zu] %s %d, %d\n", pc, opcode_names[inst.opcode], inst.arg, inst.arg2);
             printf("==============================\n");
         }
         switch(inst.opcode) {
@@ -659,20 +668,20 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                 {
                     size_t new_argc = inst.arg;
                     ASSERT(frame->sp >= (new_argc + 1));
-                    Yue_Value newfuncv = frame->stack[frame->sp - new_argc - 1];
-                    switch(newfuncv.kind) {
+                    Yue_Value new_func_v = frame->stack[frame->sp - new_argc - 1];
+                    switch(new_func_v.kind) {
                     case YUE_VALUE_FUN:
                         {
-                            Function *new_func = &module->functions.items[newfuncv.fun_id];
+                            Function *new_func = &module->functions.items[new_func_v.fun_id];
                             if(new_argc < new_func->params_count) {
-                                lexer_diagf(new_func->loc, "Function `%s` expects %zu arguments but got %zu", 
+                                lexer_diagf(inst.loc, "Function `%s` expects %zu arguments but got %zu", 
                                         new_func->name, new_func->params_count, new_argc);
                                 return false;
                             }
                             new_argc = new_func->params_count; // we only pass the neccessary
                             Yue_Value *new_args  = &frame->stack[frame->sp - new_argc];
                             Yue_Value retval = {0};
-                            if(!run_function(runtime, module, new_func, new_args, new_argc, &retval)) return false;
+                            if(!run_function(runtime, module, new_func, new_args, new_argc, &retval, inst.loc)) return false;
                             frame->sp -= new_argc + 1;
                             frame->stack[frame->sp++] = retval;
                         } break;
@@ -682,14 +691,17 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                             Yue_Call_Info info = {0};
                             info.argv = new_args;
                             info.argc = new_argc;
-                            newfuncv.cfn(NULL, &info);
+                            new_func_v.cfn(NULL, &info);
                             frame->sp -= new_argc + 1;
                             if(info.retc > 0) {
                                 frame->stack[frame->sp++] = info.retv;
                             }
                         } break;
                     default:
-                        ASSERT(newfuncv.kind == YUE_VALUE_FUN || newfuncv.kind == YUE_VALUE_CFN);
+                        if(new_func_v.kind != YUE_VALUE_FUN && new_func_v.kind != YUE_VALUE_CFN) {
+                            lexer_diagf(inst.loc, "Calling a value that's not a function");
+                            return false;
+                        }
                         break;
                     }
                 } break;
@@ -776,7 +788,11 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                 frame->locals[inst.arg] = frame->stack[--frame->sp];
                 break;
             case OP_LOCAL_GET:
-                frame->stack[frame->sp++] = frame->locals[inst.arg]; 
+                {
+                    CallFrame *source_frame = &runtime->call_frames.items[runtime->call_frames.count - 1 - inst.arg2];
+                    frame->stack[frame->sp++] = source_frame->locals[inst.arg];
+                }
+                /*frame->stack[frame->sp++] = frame->locals[inst.arg];*/
                 break;
             case OP_GLOBAL_GET:
                 {
@@ -836,8 +852,19 @@ bool run_module(Runtime *runtime, Module *module)
     runtime->call_frames.capacity = 1024;
     Function *mainfn = &module->functions.items[0];
     Yue_Value retval = {0};
-    bool result = run_function(runtime, module, mainfn, NULL, 0, &retval);
-    printf("%zu\n", runtime->call_frames.count);
+    bool result = run_function(runtime, module, mainfn, NULL, 0, &retval, HERE());
+    if(!result) {
+        fprintf(stderr, "Stack trace:\n");
+        for(int i = runtime->call_frames.count - 1; i >= 0; i--) {
+            printf("    Frame #%d in %s:%d:%d by function %s\n", 
+                    i,
+                    frames[i].trigger_loc.input_path,
+                    frames[i].trigger_loc.line_number - 1,
+                    frames[i].trigger_loc.line_offset,
+                    frames[i].fn_name
+                    );
+        }
+    }
     free(frames);
     return result;
 }
@@ -882,10 +909,15 @@ bool scope_hasvar(Parser *parser, const char *name)
         if(shtable_geti(&scope->name_table, name) >= 0) {
             return true;
         }
-        if(scope->is_function_root) break;
     }
     return false;
 }
+
+// NOTE: Man this is also a hack LOL
+typedef struct ScopedVarLoc {
+    int n_frame_up;
+    int local_slot;
+} ScopedVarLoc;
 
 int scope_getvar(Parser *parser, const char *name)
 {
@@ -896,9 +928,24 @@ int scope_getvar(Parser *parser, const char *name)
         if(index >= 0) {
             return (intptr_t)scope->name_table.items[index].value;
         }
-        if(scope->is_function_root) break;
     }
     return -1;
+}
+
+bool scope_getvar_v2(Parser *parser, const char *name, ScopedVarLoc *loc_ptr)
+{
+    ASSERT(loc_ptr);
+    int start = parser->scopes.count - 1;
+    for(int scopeptr = start; scopeptr >= 0; --scopeptr) {
+        Scope *scope = &parser->scopes.items[scopeptr];
+        int index = shtable_geti(&scope->name_table, name);
+        if(index >= 0) {
+            loc_ptr->local_slot = (intptr_t)scope->name_table.items[index].value;
+            return true;
+        }
+        if(scope->is_function_root) loc_ptr->n_frame_up += 1;
+    }
+    return false;
 }
 
 void scope_setvar(Parser *parser, const char *name, int slot)
@@ -948,10 +995,10 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
     case TOKEN_ID:
         {
             const char *name = lex->string;
-            if(scope_hasvar(parser, name)) {
-                int arg = scope_getvar(parser, name);
+            ScopedVarLoc var_loc = {0};
+            if(scope_getvar_v2(parser, name, &var_loc)) {
                 add_inst_to_function(func, 
-                        make_inst(OP_LOCAL_GET, arg, loc), 
+                        make_inst2(OP_LOCAL_GET, var_loc.local_slot, var_loc.n_frame_up, loc), 
                         module);
             } else {
                 if(runtime_hasglobal(parser->runtime, name)) {
