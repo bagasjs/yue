@@ -1,8 +1,7 @@
-// This is not working
 fun test(a) {
     return a*a
 }
 fun bar() {
-    print(test())
+    print(test(10))
 }
 bar()

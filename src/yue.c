@@ -181,6 +181,14 @@ typedef struct Yue_Object_Table {
 typedef struct CallFrame {
     Yue_Value  locals[1024];
     Yue_Value  stack[STACK_CAP];
+
+    // TODO: instead of locals maybe just use this as a table that contains all local variable.
+    //       but it requires a new mechanism in LOCAL_GET and LOCAL_SET. Preferably this new
+    //       mechanism should be using the slot in this table which will makes local variables
+    //       accessing faster. But this require Yue_Table's indexes to be stable which means
+    //       we need to have 2 array one that holds the values and one that's mapped to the hash.
+    // Yue_Value  this;
+
     size_t sp;
 } CallFrame;
 
@@ -1228,9 +1236,9 @@ bool parse_expr(Parser *parser, Lexer *lex, Module *module, Function *func)
 bool parse_block(Parser *parser, Lexer *lex, Module *module, Function *func);
 bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
 {
-    Loc loc = lexer_loc(lex);
     ParsePoint savedp = lex->parse_point;
     if(!lexer_get_token(lex)) return false;
+    Loc loc = lexer_loc(lex);
     switch(lex->token) {
         case TOKEN_RETURN:
             {
@@ -1554,7 +1562,7 @@ void dump_module(Module *module)
     printf("}\n");
     for(size_t i = 0; i < module->functions.count; ++i) {
         Function *func = &module->functions.items[i];
-        printf("func.%s(%zu) {\n", func->name, func->params_count);
+        printf("func.%s.%zu(%zu) {\n", func->name, i, func->params_count);
         if(func->insts.count > 0) {
             printf("@code\n");
             for(size_t pc = 0; pc < func->insts.count; ++pc) {
