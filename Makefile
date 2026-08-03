@@ -2,5 +2,5 @@ CC := clang
 CFLAGS := -Wall -Wextra -pedantic -D_CRT_SECURE_NO_WARNINGS -g -fsanitize=address
 LFLAGS := 
 
-build/yue.exe: src/yue.c src/lexer.c src/utils.c src/shtable.c
+build/yue.exe: src/yue.c src/lexer.c src/utils.c src/shtable.c src/main.c
 	$(CC) $(CFLAGS) -o $@ $^ $(LFLAGS)

@@ -1,6 +1,8 @@
 #ifndef YUE_H_
 #define YUE_H_
 
+#include <stdbool.h>
+
 typedef int   Yue_Int;
 typedef float Yue_Flt;
 
@@ -79,6 +81,10 @@ int yue_set_global_value(Yue_Context *ctx, const char *name, Yue_Value  value);
 int yue_get_global_value(Yue_Context *ctx, const char *name, Yue_Value *value);
 
 int yue_do_string(Yue_Context *ctx, const char *file, const char *source, size_t length);
+
+bool yue_is_string(Yue_Value value);
+bool yue_is_array(Yue_Value value);
+bool yue_is_table(Yue_Value value);
 
 Yue_Value yue_new_string(Yue_Context *ctx, const char *init_text);
 Yue_Value yue_new_array(Yue_Context *ctx);

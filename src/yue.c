@@ -89,11 +89,11 @@ typedef struct {
 } Inst;
 
 static inline Inst make_inst(Opcode opcode, int arg, Loc loc) {
-    return (Inst) { .loc = loc, opcode = opcode, .arg = arg, .arg2 = 0 };
+    return (Inst) { .loc = loc, .opcode = opcode, .arg = arg, .arg2 = 0 };
 }
 
 static inline Inst make_inst2(Opcode opcode, int arg, int arg2, Loc loc) {
-    return (Inst) { .loc = loc, opcode = opcode, .arg = arg, .arg2 = arg2 };
+    return (Inst) { .loc = loc, .opcode = opcode, .arg = arg, .arg2 = arg2 };
 }
 
 typedef struct {
@@ -485,7 +485,7 @@ void print_value(Yue_Value *values, size_t count, const char *endline, int level
                 printf("<fun#%d>", a.fun_id);
                 break;
             case YUE_VALUE_CFN:
-                printf("<cfn at %p>", a.cfn);
+                printf("<cfn at %p>", (void*)a.cfn);
                 break;
             case YUE_VALUE_OBJ:
                 {
@@ -1502,9 +1502,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                     lex->parse_point = savedp;
                     if(!parse_expr(parser, lex, module, func)) return false;
                 } else {
-                    Token tok = lex->token;
                     lex->parse_point = savedp;
-
                     if(!parse_expr_primary(parser, lex, module, func)) return false;
                     while(1) {
                         if(!lexer_get_token(lex)) return false;
@@ -1627,64 +1625,6 @@ void dump_module(Module *module)
     }
 }
 
-#ifndef YUE_NO_EASTER_EGG
-#include <stdlib.h>
-#include <time.h>
-int rand_range(int min, int max) {
-    return (rand() % (max - min + 1)) + min;
-}
-#endif
-
-void f_rand_range(Yue_Context *ctx, Yue_Call_Info *info)
-{
-    ASSERT(info->argc >= 2 && "rand_range expect more than 2 arguments");
-    Yue_Value minv = info->argv[0];
-    Yue_Value maxv = info->argv[1];
-    ASSERT(minv.kind == YUE_VALUE_INT);
-    ASSERT(maxv.kind == YUE_VALUE_INT);
-    info->retv = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = rand_range(minv.intv, maxv.intv) };
-    info->retc = 1;
-}
-
-void f_append(Yue_Context *ctx, Yue_Call_Info *info) 
-{
-    ASSERT(info->argc >= 2 && "append expect more than 2 arguments");
-    Yue_Value arrv = info->argv[0];
-    Yue_Value newv = info->argv[1];
-    ASSERT(arrv.kind == YUE_VALUE_OBJ);
-    ASSERT(arrv.objv->kind == YUE_OBJECT_ARRAY);
-
-    Yue_Object_Array *arr = (Yue_Object_Array*)arrv.objv;
-    yue_array_append(&arr->array, newv);
-    info->retc = 0;
-}
-
-void f_len(Yue_Context *ctx, Yue_Call_Info *info) 
-{
-    ASSERT(info->argc >= 1 && "len expect more than 1 arguments");
-    Yue_Value val  = info->argv[0];
-    ASSERT(val.kind == YUE_VALUE_OBJ);
-    if(val.objv->kind == YUE_OBJECT_ARRAY) {
-        Yue_Object_Array *arr = (Yue_Object_Array*)val.objv;
-        info->retv = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = arr->array.count, };
-        info->retc = 1;
-    } else if (val.objv->kind == YUE_OBJECT_STRING) {
-        Yue_Object_String *str = (Yue_Object_String*)val.objv;
-        info->retv = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = str->string.count - 1, };
-        info->retc = 1;
-    } else {
-        ASSERT(val.objv->kind == YUE_OBJECT_ARRAY || val.objv->kind == YUE_OBJECT_STRING);
-    }
-
-}
-
-void f_putchar(Yue_Context *ctx, Yue_Call_Info *info)
-{
-    ASSERT(info->argc == 1 && "len expect more than 1 arguments");
-    ASSERT(info->argv[0].kind == YUE_VALUE_INT);
-    putchar(info->argv[0].intv);
-}
-
 /// Context implementation
 
 struct Yue_Context {
@@ -1734,6 +1674,24 @@ int yue_get_global_value(Yue_Context *ctx, const char *name, Yue_Value *value)
     return 0;
 }
 
+bool yue_is_string(Yue_Value value)
+{
+    if(value.kind != YUE_VALUE_OBJ) return false;
+    return value.objv->kind == YUE_OBJECT_STRING;
+}
+
+bool yue_is_array(Yue_Value value)
+{
+    if(value.kind != YUE_VALUE_OBJ) return false;
+    return value.objv->kind == YUE_OBJECT_ARRAY;
+}
+
+bool yue_is_table(Yue_Value value)
+{
+    if(value.kind != YUE_VALUE_OBJ) return false;
+    return value.objv->kind == YUE_OBJECT_TABLE;
+}
+
 Yue_Value yue_new_string(Yue_Context *ctx, const char *init_text)
 {
 
@@ -1765,70 +1723,21 @@ Yue_Array *yue_to_array(Yue_Value value)
     return &obj->array;
 }
 
-int main(int argc, char *argv[]) 
+void reset_parser_state(Yue_Context *ctx)
 {
-    StringBuilder source = {0};
-    if(argc < 2) {
-        fprintf(stderr, "ERROR: provide a file\n");
-        fprintf(stderr, "Usage: %s <source.yue>\n", argv[0]);
-        return -1;
-    }
-    const char *source_filepath = argv[1];
+    arena_reset(ctx->parser.prog_arena);
+    arena_reset(ctx->parser.temp_arena);
+}
 
-#ifndef YUE_NO_EASTER_EGG
-    // The name Yue is inspired by a character in one of
-    // my favorite game, Rune Factory 2. Never finished it though.
-    // The second generation kinda tough to beat.
-    srand(time(NULL));
-    if(strcmp(source_filepath, "A") == 0) { // You clicked the A button LUL
-        static const char *talks[] = {
-            "Morning!",
-            "Hello!",
-            "Good evening!",
-            "Thank you!",
-            "Welcome!",
-            "What's up!",
-            "The name's Yue, I am a traveling merchant",
-            "Is that for me? Thanks!♪ I really love these! ♪",
-            "You can't have my Aquamarine! Is that for me? Thanks!♪ Sparkle sparkle! What can I say, "
-                "I just can't resist them!♪",
-            "Is that really for me? Thanks! I can certainly put that to good use.",
-            "Oh... you don't have to give me that much! I don't like slimy things... "
-                "Don't like slimy things at all! Ugh, they make me feel sick! I certainly don't need all this!",
-        };
-        int d = rand_range(0, ARRLEN(talks) - 1);
-        printf("Yue: %s\n", talks[d]);
-        return 0;
-    }
-#endif
-    if(!read_entire_file(source_filepath, &source)) return -1;
-
+int yue_do_string(Yue_Context *ctx, const char *file, const char *source, size_t length)
+{
+    reset_parser_state(ctx);
     Module module = {0};
-
-    Yue_Context *ctx = yue_open();
-    ctx->lexer = lexer_new(source_filepath, source.items, source.items + source.count);
-
-    Yue_Value args_v = yue_new_array(ctx);
-    Yue_Array *args = yue_to_array(args_v);
-
-    for(int i = 1; i < argc; ++i) {
-        yue_array_append(args, yue_new_string(ctx, argv[i]));
-    }
-
-    yue_set_global_value(ctx, "ARGS",  args_v);
-    yue_set_global_value(ctx, "nil",   (Yue_Value){ .kind = YUE_VALUE_NIL });
-    yue_set_global_value(ctx, "true",  (Yue_Value){ .kind = YUE_VALUE_INT, .intv = 1 });
-    yue_set_global_value(ctx, "false", (Yue_Value){ .kind = YUE_VALUE_INT, .intv = 0 });
-    yue_set_global_value(ctx, "rand_range", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_rand_range });
-    yue_set_global_value(ctx, "append", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_append });
-    yue_set_global_value(ctx, "putchar", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_putchar });
-    yue_set_global_value(ctx, "len", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_len });
-
+    ctx->lexer = lexer_new(file, source, source + length);
     if(!parse_program(&ctx->parser, &ctx->lexer, &module)) return -1;
     /*dump_module(&module);*/
-    if(!run_module(&ctx->runtime, &module)) return false;
-
-    yue_close(ctx);
+    if(!run_module(&ctx->runtime, &module)) return -2;
+    arena_destroy(&module.arena);
     return 0;
 }
 
