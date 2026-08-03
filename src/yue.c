@@ -989,7 +989,8 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
                     module);
         } break;
     default:
-        break;
+        lexer_diagf(loc, "Invalid token to start a primary expression. Found token `%s`", lexer_display_token(lex->token));
+        return false;
     }
     return true;
 }
@@ -1765,9 +1766,8 @@ int main(int argc, char *argv[])
 }
 
 /// TODOs:
-/// 1. Table feature
-///     b. Table literal syntax `{ "name": "foo" }`
-///     c. How do I iterate table?
 /// 1. Better error information
-/// 2. Better Embedding API
-/// 3. Currently string is kinda sucks, its count might include null term or might not include
+/// 2. Table feature
+///     c. How do I iterate table?
+/// 3. Better Embedding API
+/// 4. Currently string is kinda sucks, its count might include null term or might not include
