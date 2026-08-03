@@ -92,6 +92,7 @@ static inline Inst make_inst(Opcode opcode, int arg, Loc loc) {
 }
 
 typedef struct {
+    Loc loc;
     const char *name;
     size_t params_count;
     size_t locals_count;
@@ -528,7 +529,10 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
     sa_append(&runtime->call_frames, ((CallFrame){0}));
     CallFrame *frame = &runtime->call_frames.items[frame_ptr];
 
-    ASSERT(argc == func->params_count);
+    if(argc != func->params_count) {
+        lexer_diagf(func->loc, "Function `%s` expects %zu arguments but got %zu\n", func->params_count, argc);
+        return false;
+    }
     for(size_t i = 0; i < argc; ++i) {
         frame->locals[i] = args[i];
     }
@@ -651,12 +655,16 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                     switch(newfuncv.kind) {
                     case YUE_VALUE_FUN:
                         {
-                            Function *newfunc = &module->functions.items[newfuncv.fun_id];
-                            ASSERT(new_argc >= newfunc->params_count);
-                            new_argc = newfunc->params_count; // we only pass the neccessary
+                            Function *new_func = &module->functions.items[newfuncv.fun_id];
+                            if(new_argc < new_func->params_count) {
+                                lexer_diagf(new_func->loc, "Function `%s` expects %zu arguments but got %zu", 
+                                        new_func->name, new_func->params_count, new_argc);
+                                return false;
+                            }
+                            new_argc = new_func->params_count; // we only pass the neccessary
                             Yue_Value *new_args  = &frame->stack[frame->sp - new_argc];
                             Yue_Value retval = {0};
-                            if(!run_function(runtime, module, newfunc, new_args, new_argc, &retval)) return false;
+                            if(!run_function(runtime, module, new_func, new_args, new_argc, &retval)) return false;
                             frame->sp -= new_argc + 1;
                             frame->stack[frame->sp++] = retval;
                         } break;
@@ -821,6 +829,7 @@ bool run_module(Runtime *runtime, Module *module)
     Function *mainfn = &module->functions.items[0];
     Yue_Value retval = {0};
     bool result = run_function(runtime, module, mainfn, NULL, 0, &retval);
+    printf("%zu\n", runtime->call_frames.count);
     free(frames);
     return result;
 }
@@ -1235,6 +1244,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
 
                 scope_begin(parser, true);
                 Function *newfunc = &module->functions.items[new_func_id];
+                newfunc->loc = loc;
                 if(!lexer_get_and_expect_token(lex, TOKEN_OPAREN)) return false;
                 while(1) {
                     ParsePoint savedp = lex->parse_point;
@@ -1262,7 +1272,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                 }
                 if(!lexer_get_and_expect_token(lex, TOKEN_CPAREN)) return false;
 
-                { // add a local for the function itself
+                { // add the function to it's local scope
                     Function *newfunc = &module->functions.items[new_func_id];
                     size_t local_slot = newfunc->locals_count++;
                     // TODO: We use function name here for the table.
@@ -1289,6 +1299,8 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                 scope_end(parser, true);
 
                 {
+                    // Add function to it's parent scope
+
                     Function *newfunc = &module->functions.items[new_func_id];
                     size_t local_slot = func->locals_count++;
                     // TODO: We use function name here for the table.
@@ -1429,7 +1441,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                     }
                     size_t local_slot = scope_getvar(parser, name);
                     if(!parse_expr(parser, lex, module, func)) return false;
-                    add_inst_to_function(func, make_inst(OP_LOCAL_SET, local_slot, HERE()), module);
+                    add_inst_to_function(func, make_inst(OP_LOCAL_SET, local_slot, loc), module);
                 } else if(lex->token == TOKEN_OPAREN) {
                     // NOTE: This is a hack, because without this branch we can't call a function
                     lex->parse_point = savedp;
@@ -1446,7 +1458,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                             int arg = module->strconsts.count;
                             da_append_many(&module->strconsts, lex->string, cstrlen(lex->string));
                             da_append(&module->strconsts, 0);
-                            add_inst_to_function(func, make_inst(OP_PUSH_STR, arg, loc), module);
+                            add_inst_to_function(func, make_inst(OP_PUSH_STR, arg, lexer_loc(lex)), module);
                         } else if(lex->token == TOKEN_OBRACKET) {
                             if(!parse_expr(parser, lex, module, func)) return false;
                             if(!lexer_get_and_expect_token(lex, TOKEN_CBRACKET)) return false;
@@ -1463,12 +1475,12 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                         if(next_token == TOKEN_EQ) 
                             break;
                         else 
-                            add_inst_to_function(func, make_inst(OP_GET_ITEM, 0, HERE()), module);
+                            add_inst_to_function(func, make_inst(OP_GET_ITEM, 0, loc), module);
                     }
 
                     if(!lexer_get_and_expect_token(lex, TOKEN_EQ)) return false;
                     if(!parse_expr(parser, lex, module, func)) return false;
-                    add_inst_to_function(func, make_inst(OP_SET_ITEM, 0, HERE()), module);
+                    add_inst_to_function(func, make_inst(OP_SET_ITEM, 0, loc), module);
                 }
             } break;
         case TOKEN_PRINT:
@@ -1480,7 +1492,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                     ParsePoint savedp = lex->parse_point;
                     if(!lexer_get_token(lex)) return false;
                     if(lex->token != TOKEN_COMMA) {
-                        add_inst_to_function(func, make_inst(OP_PRINT, n, HERE()), module);
+                        add_inst_to_function(func, make_inst(OP_PRINT, n, loc), module);
                         lex->parse_point = savedp;
                         break;
                     }
@@ -1766,6 +1778,7 @@ int main(int argc, char *argv[])
 }
 
 /// TODOs:
+/// 1. Look at demo/_errors.yue
 /// 1. Better error information
 /// 2. Table feature
 ///     c. How do I iterate table?
