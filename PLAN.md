@@ -15,3 +15,10 @@ to allocate string again and again)
 `this` table (it's a keyword) where `this` contains all the variables in current scope. The cool
 thing is that we still can have slot accessing (for faster access) either by using hash or the index
 in the value (but the table's entries' index must be stable)
+
+## SQLite3's style Source Code Amalgamation
+### Motivation
+Easier distribution
+### TODO
+1. Use github.com/tsoding/nob.h as build system as it makes it easier to preprocess source code first
+2. Create our own preprocessing format in the build system. (or we can track the #include but this is harder)

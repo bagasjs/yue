@@ -1742,9 +1742,7 @@ int yue_do_string(Yue_Context *ctx, const char *file, const char *source, size_t
 }
 
 /// TODOs:
-/// 1. Look at demo/_errors.yue
 /// 1. Better error information
 /// 2. Table feature
-///     c. How do I iterate table?
-/// 3. Better Embedding API
-/// 4. Currently string is kinda sucks, its count might include null term or might not include
+///     a. How do I iterate table?
+/// 3. Currently string is kinda sucks, its count might include null term or might not include
