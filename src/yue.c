@@ -1280,8 +1280,8 @@ bool parse_expr(Parser *parser, Lexer *lex, Module *module, Function *func)
     return true;
 }
 
-bool parse_block(Parser *parser, Lexer *lex, Module *module, Function *func);
-bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
+bool parse_block(Parser *parser, Lexer *lex, Module *module, Function *func, int loop_label_start, int loop_label_end);
+bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func, int loop_label_start, int loop_label_end)
 {
     ParsePoint savedp = lex->parse_point;
     if(!lexer_get_token(lex)) return false;
@@ -1348,7 +1348,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                     lex->parse_point = savedp;
                     // in case the pointer is changed because appending new function inside the function's body
                     Function *newfunc = &module->functions.items[new_func_id];
-                    if(!parse_stmt(parser, lex, module, newfunc)) return false;
+                    if(!parse_stmt(parser, lex, module, newfunc, -1, -1)) return false;
                     arena_reset(parser->temp_arena);
                 }
                 scope_end(parser, true);
@@ -1384,6 +1384,22 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                 if(!parse_expr(parser, lex, module, func)) return false;
                 add_inst_to_function(func, make_inst(OP_LOCAL_SET, local_slot, loc), module);
             } break;
+        case TOKEN_BREAK:
+            {
+                if(loop_label_end < 0 && loop_label_start < 0) {
+                    lexer_diagf(loc, "Could not `break` outside a loop");
+                    return false;
+                }
+                add_inst_to_function(func, make_inst(OP_JMP, loop_label_end, loc), module);
+            } break;
+        case TOKEN_CONTINUE:
+            {
+                if(loop_label_end < 0 && loop_label_start < 0) {
+                    lexer_diagf(loc, "Could not `continue` outside a loop");
+                    return false;
+                }
+                add_inst_to_function(func, make_inst(OP_JMP, loop_label_start, loc), module);
+            } break;
         case TOKEN_WHILE:
             {
                 size_t label_start = func->labels.count; // nop is what pointed by label_start
@@ -1403,7 +1419,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                 if(!lexer_get_and_expect_token(lex, TOKEN_CPAREN)) return false;
                 if(!lexer_get_and_expect_token(lex, TOKEN_OCURLY)) return false;
                 // TODO: support for continue and break statement
-                if(!parse_block(parser, lex, module, func)) return false;
+                if(!parse_block(parser, lex, module, func, label_start, label_end)) return false;
                 if(!lexer_get_and_expect_token(lex, TOKEN_CCURLY)) return false;
                 add_inst_to_function(func, make_inst(OP_JMP, label_start, HERE()), module);
                 add_inst_to_function(func, make_inst(OP_NOP, 0, HERE()), module);
@@ -1422,7 +1438,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                 add_inst_to_function(func, make_inst(OP_JEZ, label_next, HERE()), module);
 
                 if(!lexer_get_and_expect_token(lex, TOKEN_OCURLY)) return false;
-                if(!parse_block(parser, lex, module, func)) return false;
+                if(!parse_block(parser, lex, module, func, loop_label_start, loop_label_end)) return false;
                 if(!lexer_get_and_expect_token(lex, TOKEN_CCURLY)) return false;
 
                 ParsePoint savedp = lex->parse_point;
@@ -1456,7 +1472,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                             add_inst_to_function(func, make_inst(OP_JEZ, label_next , HERE()), module);
 
                             if(!lexer_get_and_expect_token(lex, TOKEN_OCURLY)) return false;
-                            if(!parse_block(parser, lex, module, func)) return false;
+                            if(!parse_block(parser, lex, module, func, loop_label_start, loop_label_end)) return false;
                             if(!lexer_get_and_expect_token(lex, TOKEN_CCURLY)) return false;
                             // After finished just go to label_end
                             add_inst_to_function(func, make_inst(OP_JMP, label_end, HERE()), module);
@@ -1469,7 +1485,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
                             func->labels.items[label_next] = func->insts.count - 1;
 
                             if(!lexer_expect_token(lex, TOKEN_OCURLY)) return false;
-                            if(!parse_block(parser, lex, module, func)) return false;
+                            if(!parse_block(parser, lex, module, func, loop_label_start, loop_label_end)) return false;
                             if(!lexer_get_and_expect_token(lex, TOKEN_CCURLY)) return false;
                             // lastly patch label_end so after each branches finished their body they can
                             // jump to the end of the entire branch statement
@@ -1562,7 +1578,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func)
     return true;
 }
 
-bool parse_block(Parser *parser, Lexer *lex, Module *module, Function *func)
+bool parse_block(Parser *parser, Lexer *lex, Module *module, Function *func, int loop_label_start, int loop_label_end)
 {
     scope_begin(parser, false);
     while(1) {
@@ -1573,7 +1589,7 @@ bool parse_block(Parser *parser, Lexer *lex, Module *module, Function *func)
             break;
         }
         lex->parse_point = savedp;
-        if(!parse_stmt(parser, lex, module, func)) return false;
+        if(!parse_stmt(parser, lex, module, func, loop_label_start, loop_label_end)) return false;
         arena_reset(parser->temp_arena);
     }
     scope_end(parser, false);
@@ -1590,7 +1606,7 @@ bool parse_program(Parser *parser, Lexer *lex, Module *module)
         if(!lexer_get_token(lex)) return false;
         if(lex->token == TOKEN_EOF) break;
         lex->parse_point = savedp;
-        if(!parse_stmt(parser, lex, module, &module->functions.items[mainfn])) return false;
+        if(!parse_stmt(parser, lex, module, &module->functions.items[mainfn], -1, -1)) return false;
         arena_reset(parser->temp_arena);
     }
     scope_end(parser, true);
