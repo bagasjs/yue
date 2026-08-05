@@ -9,30 +9,41 @@ int rand_range(int min, int max) {
 }
 #endif
 
-void f_rand_range(Yue_Context *ctx, Yue_Call_Info *info)
+bool f_rand_range(Yue_Context *ctx, Yue_Call_Info *info)
 {
-    ASSERT(info->argc >= 2 && "rand_range expect more than 2 arguments");
+    if(info->argc < 2) {
+        fprintf(stderr, "rand_range expect more than 2 arguments");
+        return false;
+    }
     Yue_Value minv = info->argv[0];
     Yue_Value maxv = info->argv[1];
     ASSERT(minv.kind == YUE_VALUE_INT);
     ASSERT(maxv.kind == YUE_VALUE_INT);
     info->retv = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = rand_range(minv.intv, maxv.intv) };
     info->retc = 1;
+    return true;
 }
 
-void f_append(Yue_Context *ctx, Yue_Call_Info *info) 
+bool f_append(Yue_Context *ctx, Yue_Call_Info *info) 
 {
-    ASSERT(info->argc >= 2 && "append expect more than 2 arguments");
+    if(info->argc < 2) {
+        fprintf(stderr, "append expect more than 2 arguments");
+        return false;
+    }
     Yue_Value arrv = info->argv[0];
     Yue_Value newv = info->argv[1];
     Yue_Array *arr = yue_to_array(arrv);
     yue_array_append(arr, newv);
     info->retc = 0;
+    return true;
 }
 
-void f_len(Yue_Context *ctx, Yue_Call_Info *info) 
+bool f_len(Yue_Context *ctx, Yue_Call_Info *info) 
 {
-    ASSERT(info->argc >= 1 && "len expect more than 1 arguments");
+    if(info->argc < 1) {
+        fprintf(stderr, "len expect more than 2 arguments");
+        return false;
+    }
     Yue_Value val  = info->argv[0];
     if(yue_is_array(val)) {
         Yue_Array *arr = yue_to_array(val);
@@ -43,16 +54,18 @@ void f_len(Yue_Context *ctx, Yue_Call_Info *info)
         info->retv = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = str->count - 1, };
         info->retc = 1;
     } else {
-        ASSERT(0 && (yue_is_array(val) || yue_is_string(val)));
+        fprintf(stderr, "len expecting either array or string\n");
+        return false;
     }
-
+    return true;
 }
 
-void f_putchar(Yue_Context *ctx, Yue_Call_Info *info)
+bool f_putchar(Yue_Context *ctx, Yue_Call_Info *info)
 {
     ASSERT(info->argc == 1 && "len expect more than 1 arguments");
     ASSERT(info->argv[0].kind == YUE_VALUE_INT);
     putchar(info->argv[0].intv);
+    return true;
 }
 
 int main(int argc, char *argv[]) 

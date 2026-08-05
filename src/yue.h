@@ -14,7 +14,7 @@ typedef struct Yue_String  Yue_String;
 typedef struct Yue_Array   Yue_Array;
 typedef struct Yue_Call_Info Yue_Call_Info;
 
-typedef void (*Yue_Cfn)(Yue_Context *ctx, Yue_Call_Info *info); // Native Function
+typedef bool (*Yue_Cfn)(Yue_Context *ctx, Yue_Call_Info *info); // Native Function
 
 typedef enum Yue_Value_Kind {
     YUE_VALUE_NIL = 0,
@@ -44,6 +44,7 @@ struct Yue_Value {
 };
 
 struct Yue_Call_Info {
+
     Yue_Value *argv; // argument values
     int        argc; // count of argv
     Yue_Value  retv; // return values

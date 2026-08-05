@@ -691,7 +691,11 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                             Yue_Call_Info info = {0};
                             info.argv = new_args;
                             info.argc = new_argc;
-                            new_func_v.cfn(NULL, &info);
+                            if(!new_func_v.cfn(NULL, &info)) {
+                                fprintf(stderr, "\n\n");
+                                lexer_diagf(inst.loc, "Calling native function failure");
+                                return false;
+                            }
                             frame->sp -= new_argc + 1;
                             if(info.retc > 0) {
                                 frame->stack[frame->sp++] = info.retv;
