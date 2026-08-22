@@ -876,6 +876,10 @@ bool run_module(Runtime *runtime, Module *module)
     return result;
 }
 
+// There's only 3 scopes in Yue
+// 1. Global Scope which can be accessed by all module
+// 2. Module Scope which is the top level function or __main__ function
+// 3. Function scopes and scope for every block inside that function
 typedef struct {
     bool is_function_root;
     shtable_t name_table;
@@ -910,14 +914,16 @@ bool scope_end(Parser *parser, bool is_function_root)
 
 bool scope_hasvar(Parser *parser, const char *name)
 {
-    int start = parser->scopes.count - 1;
-    for(int scopeptr = start; scopeptr >= 0; --scopeptr) {
-        Scope *scope = &parser->scopes.items[scopeptr];
-        if(shtable_geti(&scope->name_table, name) >= 0) {
-            return true;
-        }
-    }
-    return false;
+    /*int start = parser->scopes.count - 1;*/
+    /*for(int scopeptr = start; scopeptr >= 0; --scopeptr) {*/
+    /*    Scope *scope = &parser->scopes.items[scopeptr];*/
+    /*    if(shtable_geti(&scope->name_table, name) >= 0) {*/
+    /*        return true;*/
+    /*    }*/
+    /*}*/
+    /**/
+    int index = shtable_geti(&parser->scopes.items[parser->scopes.count - 1].name_table, name);
+    return index >= 0;
 }
 
 // NOTE: Man this is also a hack LOL
@@ -1068,9 +1074,8 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
 
 bool parse_expr_postfix(Parser *parser, Lexer *lex, Module *module, Function *func)
 {
-    Loc loc = lexer_loc(lex);
     if(!parse_expr_primary(parser, lex, module, func)) return false;
-
+    Loc loc = lexer_loc(lex);
     while(1) {
         ParsePoint savedp = lex->parse_point;
         if(!lexer_get_token(lex)) return false;
