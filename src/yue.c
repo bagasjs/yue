@@ -97,6 +97,7 @@ static inline Inst make_inst2(Opcode opcode, int arg, int arg2, Loc loc) {
 }
 
 typedef struct {
+    int id;
     Loc loc;
     const char *name;
     size_t params_count;
@@ -140,8 +141,10 @@ typedef struct {
 
 int add_new_function_to_module(Module *module, const char *name)
 {
+    int id = module->functions.count;
     arena_da_append(&module->arena, &module->functions, ((Function){0}));
     Function *result = &module->functions.items[module->functions.count - 1];
+    result->id = id;
     result->name = arena_strdup(&module->arena, name);
     return module->functions.count - 1;
 }
@@ -1298,7 +1301,14 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func, int 
             } break;
         case TOKEN_FUN:
             {
+                // NOTE: we can only create new function in the top level of the file
                 if(!lexer_get_and_expect_token(lex, TOKEN_ID)) return false;
+                if(func->id > 0) {
+                    lexer_diagf(loc, "Defining a new function `%s` inside another function `%s` is not allowed",
+                            lex->string, func->name);
+                    return false;
+                }
+
                 int new_func_id = add_new_function_to_module(module, lex->string);
 
                 scope_begin(parser, true);
