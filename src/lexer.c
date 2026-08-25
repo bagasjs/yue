@@ -22,7 +22,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-#include "lexer.h"
+#include "lexer.h" // nob = skip_line
 #include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>

@@ -1,8 +1,13 @@
 #include <stdio.h>
-#include "utils.h"
-#include "lexer.h"
-#include "shtable.h"
 #include "yue.h"
+
+#include "utils.h" // nob = inline_include
+#include "utils.c" // nob = inline_include
+#include "lexer.h" // nob = inline_include
+#include "lexer.c" // nob = inline_include
+
+#define SHTABLE_IMPLEMENTATION
+#include "shtable.h" //nob = inline_include
 
 typedef enum Op {
     OP_NOP = 0,
