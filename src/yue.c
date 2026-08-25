@@ -159,6 +159,28 @@ void add_inst_to_function(Function *function, Inst inst, Module *module)
     arena_da_append(&module->arena, &function->insts, inst);
 }
 
+int find_or_add_cstr_in_module(Module *module, const char *text)
+{
+    size_t text_count = cstrlen(text);
+
+    int i = 0;
+    char *strconsts = module->strconsts.items;
+    while(i < module->strconsts.count) {
+        const char *str = &strconsts[i];
+        size_t strn = cstrlen(str);
+        bool ok = cstrcmp(str, text) == 0;
+        /*printf("[%d] (%zu)%s == %s -> %d\n", i, strn, str, text, ok);*/
+        if(ok) return i;
+        i += strn + 1;
+    }
+
+    // Add
+    int result = module->strconsts.count;
+    da_append_many(&module->strconsts, text, text_count);
+    da_append(&module->strconsts, 0);
+    return result;
+}
+
 int find_function_in_module(const char *name, Module *module)
 {
     for(size_t i = 0; i < module->functions.count; ++i) {
@@ -1013,9 +1035,7 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
         } break;
     case TOKEN_STRING_LIT:
         {
-            int arg = module->strconsts.count;
-            da_append_many(&module->strconsts, lex->string, cstrlen(lex->string));
-            da_append(&module->strconsts, 0);
+            int arg = find_or_add_cstr_in_module(module, lex->string);
             add_inst_to_function(func, 
                     make_inst(OP_PUSH_STR, arg, loc),
                     module);
