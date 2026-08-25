@@ -7,6 +7,8 @@ const char *resolve_include_file_path(String_View include_file, const char *inpu
     return nob_temp_sprintf("%s"SV_Fmt, dir, SV_Arg(include_file));
 }
 
+#define ENDL "\n"
+
 NOBDEF Nob_String_View nob_sv_chop_by_sv(Nob_String_View *sv, Nob_String_View delim)
 {
     size_t i = 0;
@@ -53,18 +55,18 @@ bool preprocess_nob_in_file(const char *input_file_path, Nob_String_Builder *out
                 command = sv_trim(command);
                 if(sv_eq(command, SVLIT("inline_include"))) {
                     const char *include_file = resolve_include_file_path(file, input_file_path);
-                    sb_appendf(output, "/// --- [BEGIN] Amalgamation of \""SV_Fmt"\"\n", SV_Arg(file));
+                    sb_appendf(output, "/// --- [BEGIN] Amalgamation of \""SV_Fmt"\""ENDL, SV_Arg(file));
                     if(!preprocess_nob_in_file(include_file, output)) return false;
-                    sb_appendf(output, "/// --- [END]   Amalgamation of \""SV_Fmt"\"\n", SV_Arg(file));
+                    sb_appendf(output, "/// --- [END]   Amalgamation of \""SV_Fmt"\""ENDL, SV_Arg(file));
                 } else if(sv_eq(command, SVLIT("skip_line"))) {
                 } else {
-                    sb_appendf(output, "#include \""SV_Fmt"\"\n", SV_Arg(file));
+                    sb_appendf(output, "#include \""SV_Fmt"\""ENDL, SV_Arg(file));
                 }
             } else {
-                sb_appendf(output, "#include \""SV_Fmt"\"\n", SV_Arg(file));
+                sb_appendf(output, "#include \""SV_Fmt"\""ENDL, SV_Arg(file));
             }
         } else {
-            sb_appendf(output, SV_Fmt"\n", SV_Arg(line));
+            sb_appendf(output, SV_Fmt""ENDL, SV_Arg(sv_trim_right(line)));
         }
         i += 1;
     }
@@ -86,13 +88,16 @@ int main(int argc, char *argv[])
         "./src/yue.c",
         "./src/main.c",
     };
-    Nob_String_Builder output = {0};
-    if(!preprocess_nob_in_file("./src/yue.c", &output)) {
-        return false;
-    }
-    write_entire_file("./build/yue_amalgamated.c", output.items, output.count);
 
     if(nob_needs_rebuild(output_file, source_files, ARRAY_LEN(source_files))) {
+
+        Nob_String_Builder output = {0};
+        if(!preprocess_nob_in_file("./src/yue.c", &output)) {
+            return false;
+        }
+        write_entire_file("./build/yue.c", output.items, output.count);
+        copy_file("./src/yue.h", "./build/yue.h");
+
         Nob_Cmd cmd = {0};
         nob_cc(&cmd);
         nob_cc_flags(&cmd);
