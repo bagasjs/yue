@@ -792,14 +792,18 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                 } break;
 
             case OP_LOCAL_SET:
-                frame->locals[inst.arg] = frame->stack[--frame->sp];
+                {
+                    CallFrame *target_frame = frame;
+                    if(inst.arg2) target_frame = &runtime->call_frames.items[0];
+                    target_frame->locals[inst.arg] = frame->stack[--frame->sp];
+                }
                 break;
             case OP_LOCAL_GET:
                 {
-                    CallFrame *source_frame = &runtime->call_frames.items[runtime->call_frames.count - 1 - inst.arg2];
+                    CallFrame *source_frame = frame;
+                    if(inst.arg2) source_frame = &runtime->call_frames.items[0];
                     frame->stack[frame->sp++] = source_frame->locals[inst.arg];
                 }
-                /*frame->stack[frame->sp++] = frame->locals[inst.arg];*/
                 break;
             case OP_GLOBAL_GET:
                 {
@@ -857,6 +861,7 @@ bool run_module(Runtime *runtime, Module *module)
     Yue_Value *stack_values = malloc(sizeof(*stack_values) * 1024);
     runtime->call_frames.items    = frames;
     runtime->call_frames.capacity = 1024;
+    runtime->call_frames.count = 0;
     Function *mainfn = &module->functions.items[0];
     Yue_Value retval = {0};
     bool result = run_function(runtime, module, mainfn, NULL, 0, &retval, HERE());
@@ -881,8 +886,8 @@ bool run_module(Runtime *runtime, Module *module)
 // 2. Module Scope which is the top level function or __main__ function
 // 3. Function scopes and scope for every block inside that function
 typedef struct {
-    bool is_function_root;
     shtable_t name_table;
+    bool is_function_root;
 } Scope;
 
 typedef struct {
@@ -912,6 +917,12 @@ bool scope_end(Parser *parser, bool is_function_root)
     return true;
 }
 
+// TODO: Man this is feels like a HACK LOL we need a better abstraction
+typedef struct ScopedVarLoc {
+    int local_slot;
+    bool is_module_scope;
+} ScopedVarLoc;
+
 bool scope_hasvar(Parser *parser, const char *name)
 {
     /*int start = parser->scopes.count - 1;*/
@@ -921,42 +932,30 @@ bool scope_hasvar(Parser *parser, const char *name)
     /*        return true;*/
     /*    }*/
     /*}*/
-    /**/
-    int index = shtable_geti(&parser->scopes.items[parser->scopes.count - 1].name_table, name);
-    return index >= 0;
+    /*return false;*/
+    return shtable_geti(&parser->scopes.items[parser->scopes.count - 1].name_table, name) >= 0;
 }
 
-// NOTE: Man this is also a hack LOL
-typedef struct ScopedVarLoc {
-    int n_frame_up;
-    int local_slot;
-} ScopedVarLoc;
-
-int scope_getvar(Parser *parser, const char *name)
+bool scope_getvar_v3(Parser *parser, const char *name, ScopedVarLoc *loc_ptr)
 {
-    int start = parser->scopes.count - 1;
-    for(int scopeptr = start; scopeptr >= 0; --scopeptr) {
-        Scope *scope = &parser->scopes.items[scopeptr];
-        int index = shtable_geti(&scope->name_table, name);
-        if(index >= 0) {
-            return (intptr_t)scope->name_table.items[index].value;
-        }
-    }
-    return -1;
-}
-
-bool scope_getvar_v2(Parser *parser, const char *name, ScopedVarLoc *loc_ptr)
-{
-    ASSERT(loc_ptr);
-    int start = parser->scopes.count - 1;
-    for(int scopeptr = start; scopeptr >= 0; --scopeptr) {
-        Scope *scope = &parser->scopes.items[scopeptr];
+    for(int scope_i = parser->scopes.count - 1; scope_i >= 0; --scope_i) {
+        Scope *scope = &parser->scopes.items[scope_i];
         int index = shtable_geti(&scope->name_table, name);
         if(index >= 0) {
             loc_ptr->local_slot = (intptr_t)scope->name_table.items[index].value;
+            loc_ptr->is_module_scope = false;
             return true;
         }
-        if(scope->is_function_root) loc_ptr->n_frame_up += 1;
+        if(scope->is_function_root) {
+            Scope *scope = &parser->scopes.items[0];
+            int index = shtable_geti(&scope->name_table, name);
+            if(index >= 0) {
+                loc_ptr->local_slot = (intptr_t)scope->name_table.items[index].value;
+                loc_ptr->is_module_scope = true;
+                return true;
+            }
+            return false;
+        }
     }
     return false;
 }
@@ -1009,10 +1008,16 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
         {
             const char *name = lex->string;
             ScopedVarLoc var_loc = {0};
-            if(scope_getvar_v2(parser, name, &var_loc)) {
-                add_inst_to_function(func, 
-                        make_inst2(OP_LOCAL_GET, var_loc.local_slot, var_loc.n_frame_up, loc), 
-                        module);
+            if(scope_getvar_v3(parser, name, &var_loc)) {
+                if(var_loc.is_module_scope) {
+                    add_inst_to_function(func, 
+                            make_inst2(OP_LOCAL_GET, var_loc.local_slot, 1, loc), 
+                            module);
+                } else {
+                    add_inst_to_function(func, 
+                            make_inst2(OP_LOCAL_GET, var_loc.local_slot, 0, loc), 
+                            module);
+                }
             } else {
                 if(runtime_hasglobal(parser->runtime, name)) {
                     int arg = runtime_getglobal(parser->runtime, name);
@@ -1437,7 +1442,6 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func, int 
 
                 if(!lexer_get_and_expect_token(lex, TOKEN_CPAREN)) return false;
                 if(!lexer_get_and_expect_token(lex, TOKEN_OCURLY)) return false;
-                // TODO: support for continue and break statement
                 if(!parse_block(parser, lex, module, func, label_start, label_end)) return false;
                 if(!lexer_get_and_expect_token(lex, TOKEN_CCURLY)) return false;
                 add_inst_to_function(func, make_inst(OP_JMP, label_start, HERE()), module);
@@ -1523,15 +1527,17 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func, int 
                 const char *name = arena_strdup(parser->prog_arena, lex->string);
                 if(!lexer_get_token(lex)) return false;
                 if(lex->token == TOKEN_EQ) {
-                    if(!scope_hasvar(parser, name)) {
+                    ScopedVarLoc var_loc = {0};
+                    if(!scope_getvar_v3(parser, name, &var_loc)) {
                         lexer_diagf(lexer_loc(lex), 
                                 "error: variable with name `%s` is not exists",
                                 name);
                         return false;
                     }
-                    size_t local_slot = scope_getvar(parser, name);
                     if(!parse_expr(parser, lex, module, func)) return false;
-                    add_inst_to_function(func, make_inst(OP_LOCAL_SET, local_slot, loc), module);
+                    add_inst_to_function(func, 
+                            make_inst2(OP_LOCAL_SET, var_loc.local_slot, var_loc.is_module_scope, loc), 
+                            module);
                 } else if(lex->token == TOKEN_OPAREN) {
                     // NOTE: This is a hack, because without this branch we can't call a function
                     lex->parse_point = savedp;
@@ -1647,7 +1653,7 @@ void dump_module(Module *module)
             printf("@code\n");
             for(size_t pc = 0; pc < func->insts.count; ++pc) {
                 Inst inst = func->insts.items[pc];
-                printf("    [%zu] %s %d\n", pc, opcode_names[inst.opcode], inst.arg);
+                printf("    [%zu] %s %d %d\n", pc, opcode_names[inst.opcode], inst.arg, inst.arg2);
             }
         }
         if(func->labels.count > 0) {
@@ -1758,7 +1764,7 @@ Yue_Array *yue_to_array(Yue_Value value)
     return &obj->array;
 }
 
-void reset_parser_state(Yue_Context *ctx)
+static void reset_parser_state(Yue_Context *ctx)
 {
     arena_reset(ctx->parser.prog_arena);
     arena_reset(ctx->parser.temp_arena);
