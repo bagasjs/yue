@@ -38,6 +38,9 @@ typedef enum Op {
 
     OP_LOCAL_SET,
     OP_LOCAL_GET,
+    OP_TOP_LEVEL_GET,
+    OP_TOP_LEVEL_SET,
+
     OP_GLOBAL_GET,
 
     OP_JMP,
@@ -76,6 +79,8 @@ const char *opcode_names[] = {
 
     [OP_LOCAL_SET] = "OP_LOCAL_SET",
     [OP_LOCAL_GET] = "OP_LOCAL_GET",
+    [OP_TOP_LEVEL_SET] = "OP_TOP_LEVEL_SET",
+    [OP_TOP_LEVEL_GET] = "OP_TOP_LEVEL_GET",
     [OP_GLOBAL_GET] = "OP_GLOBAL_GET",
 
     [OP_JMP] = "OP_JMP",
@@ -90,15 +95,10 @@ typedef struct {
     Loc    loc;
     Opcode opcode;
     int    arg;
-    int    arg2; // NOTE: used for up value man this is a hack
 } Inst;
 
 static inline Inst make_inst(Opcode opcode, int arg, Loc loc) {
-    return (Inst) { .loc = loc, .opcode = opcode, .arg = arg, .arg2 = 0 };
-}
-
-static inline Inst make_inst2(Opcode opcode, int arg, int arg2, Loc loc) {
-    return (Inst) { .loc = loc, .opcode = opcode, .arg = arg, .arg2 = arg2 };
+    return (Inst) { .loc = loc, .opcode = opcode, .arg = arg, };
 }
 
 typedef struct {
@@ -546,7 +546,9 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
 {
     size_t pc = 0;
     int print_iter = 0;
-    const int PRINT_CAP = 0;
+    const int  PRINT_CAP = 0;
+    const bool SILENT_PRINT = false;
+    const int  STACK_PRINT_LIMIT = 0;
 
     size_t frame_ptr = runtime->call_frames.count;
     sa_append(&runtime->call_frames, ((CallFrame){0}));
@@ -572,12 +574,16 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
             printf("STATS [print_iter=%d, callframe=%zu, sp=%zu]\n", print_iter, frame_ptr, frame->sp);
             printf("------------------\n");
             printf("CURRENT STACK:\n");
-            for(size_t i = 0; i < frame->sp; ++i) {
+            size_t total = frame->sp;
+            if(STACK_PRINT_LIMIT > 0) {
+                if(total > STACK_PRINT_LIMIT) total = STACK_PRINT_LIMIT;
+            }
+            for(size_t i = 0; i < total; ++i) {
                 Yue_Value a = frame->stack[i];
                 print_value(&a, 1, "\n", 0);
             }
             printf("------------------\n");
-            printf("[%zu] %s %d, %d\n", pc, opcode_names[inst.opcode], inst.arg, inst.arg2);
+            printf("[%zu] %s %d\n", pc, opcode_names[inst.opcode], inst.arg);
             printf("==============================\n");
         }
         switch(inst.opcode) {
@@ -797,19 +803,22 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                 } break;
 
             case OP_LOCAL_SET:
-                {
-                    CallFrame *target_frame = frame;
-                    if(inst.arg2) target_frame = &runtime->call_frames.items[0];
-                    target_frame->locals[inst.arg] = frame->stack[--frame->sp];
-                }
+                frame->locals[inst.arg] = frame->stack[--frame->sp];
                 break;
             case OP_LOCAL_GET:
-                {
-                    CallFrame *source_frame = frame;
-                    if(inst.arg2) source_frame = &runtime->call_frames.items[0];
-                    frame->stack[frame->sp++] = source_frame->locals[inst.arg];
-                }
+                frame->stack[frame->sp++] = frame->locals[inst.arg];
                 break;
+            case OP_TOP_LEVEL_GET:
+                {
+                    CallFrame *top_level_frame = &runtime->call_frames.items[0];
+                    frame->stack[frame->sp++] = top_level_frame->locals[inst.arg];
+                } break;
+            case OP_TOP_LEVEL_SET:
+                {
+                    CallFrame *top_level_frame = &runtime->call_frames.items[0];
+                    top_level_frame->locals[inst.arg] = frame->stack[--frame->sp];
+                } break;
+
             case OP_GLOBAL_GET:
                 {
                     Yue_Value value = runtime->globals.items[inst.arg];
@@ -841,13 +850,15 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                 } break;
             case OP_PRINT:
                 {
-                    if(inst.arg > (int)frame->sp) {
-                        fprintf(stderr, "%d %zu\n", inst.arg, frame->sp);
-                        ASSERT(inst.arg <= (int)frame->sp);
+                    if(!SILENT_PRINT) {
+                        if(inst.arg > (int)frame->sp) {
+                            fprintf(stderr, "%d %zu\n", inst.arg, frame->sp);
+                            ASSERT(inst.arg <= (int)frame->sp);
+                        }
+                        Yue_Value *start = &frame->stack[frame->sp - inst.arg];
+                        frame->sp -= inst.arg;
+                        print_value(start, inst.arg, "\n", 0);
                     }
-                    Yue_Value *start = &frame->stack[frame->sp - inst.arg];
-                    frame->sp -= inst.arg;
-                    print_value(start, inst.arg, "\n", 0);
                 } break;
             default:
                 ASSERT(0 && "Not implemented or Unreachable");
@@ -1016,11 +1027,11 @@ bool parse_expr_primary(Parser *parser, Lexer *lex, Module *module, Function *fu
             if(scope_getvar_v3(parser, name, &var_loc)) {
                 if(var_loc.is_module_scope) {
                     add_inst_to_function(func, 
-                            make_inst2(OP_LOCAL_GET, var_loc.local_slot, 1, loc), 
+                            make_inst(OP_TOP_LEVEL_GET, var_loc.local_slot, loc), 
                             module);
                 } else {
                     add_inst_to_function(func, 
-                            make_inst2(OP_LOCAL_GET, var_loc.local_slot, 0, loc), 
+                            make_inst(OP_LOCAL_GET, var_loc.local_slot, loc), 
                             module);
                 }
             } else {
@@ -1540,9 +1551,8 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func, int 
                         return false;
                     }
                     if(!parse_expr(parser, lex, module, func)) return false;
-                    add_inst_to_function(func, 
-                            make_inst2(OP_LOCAL_SET, var_loc.local_slot, var_loc.is_module_scope, loc), 
-                            module);
+                    enum Op op = var_loc.is_module_scope ? OP_TOP_LEVEL_SET : OP_LOCAL_SET;
+                    add_inst_to_function(func, make_inst(op, var_loc.local_slot, loc), module);
                 } else if(lex->token == TOKEN_OPAREN) {
                     // NOTE: This is a hack, because without this branch we can't call a function
                     lex->parse_point = savedp;
@@ -1658,7 +1668,7 @@ void dump_module(Module *module)
             printf("@code\n");
             for(size_t pc = 0; pc < func->insts.count; ++pc) {
                 Inst inst = func->insts.items[pc];
-                printf("    [%zu] %s %d %d\n", pc, opcode_names[inst.opcode], inst.arg, inst.arg2);
+                printf("    [%zu] %s %d\n", pc, opcode_names[inst.opcode], inst.arg);
             }
         }
         if(func->labels.count > 0) {
