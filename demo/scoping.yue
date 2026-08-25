@@ -1,0 +1,18 @@
+var zero = 20
+
+fun first() {
+    print("first", zero)
+}
+
+fun second() {
+    first()
+    print("second", zero)
+}
+
+fun third() {
+    second()
+    print("third", zero)
+}
+
+third()
+
