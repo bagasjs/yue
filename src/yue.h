@@ -3,6 +3,10 @@
 
 #include <stdbool.h>
 
+#define YUE_VERSION_MAJOR    0
+#define YUE_VERSION_MINOR    1
+#define YUE_VERSION_REVISION 0
+
 typedef int   Yue_Int;
 typedef float Yue_Flt;
 

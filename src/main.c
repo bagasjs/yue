@@ -70,13 +70,33 @@ bool f_putchar(Yue_Context *ctx, Yue_Call_Info *info)
 
 int main(int argc, char *argv[]) 
 {
-    StringBuilder source = {0};
-    if(argc < 2) {
+    if(argc == 1) {
         fprintf(stderr, "ERROR: provide a file\n");
         fprintf(stderr, "Usage: %s <source.yue>\n", argv[0]);
         return -1;
     }
-    const char *source_filepath = argv[1];
+
+    const char *source_filepath = NULL;
+    for(int i = 1; i < argc; ++i) {
+        if(cstrcmp(argv[i], "--help") == 0 || cstrcmp(argv[i], "-h") == 0) {
+            printf("Usage: %s [flags] <source.yue>\n", argv[0]);
+            printf("Available Flags\n");
+            printf("    --help, -h    Print this useful message\n");
+            printf("    --version     Print the current Yue version\n");
+            return 0;
+        } else if(cstrcmp(argv[i], "--version") == 0) {
+#ifdef YUE_BUILD_DATETIME
+            printf("Yue %d.%d.%d built at %s\n", YUE_VERSION_MAJOR, YUE_VERSION_MINOR, YUE_VERSION_REVISION, YUE_BUILD_DATETIME);
+#else
+            printf("Yue %d.%d.%d\n", YUE_VERSION_MAJOR, YUE_VERSION_MINOR, YUE_VERSION_REVISION);
+#endif
+            return 0;
+        } else {
+            if(source_filepath == NULL) {
+                source_filepath = argv[i];
+            }
+        }
+    }
 
 #ifndef YUE_NO_EASTER_EGG
     // The name Yue is inspired by a character in one of
@@ -104,6 +124,8 @@ int main(int argc, char *argv[])
         return 0;
     }
 #endif
+
+    StringBuilder source = {0};
     if(!read_entire_file(source_filepath, &source)) return -1;
 
     Yue_Context *ctx = yue_open();

@@ -1,5 +1,8 @@
+#define DATETIME_IMPLEMENTATION
+#include "src_build/datetime.h"
+
 #define NOB_IMPLEMENTATION
-#include "nob.h"
+#include "src_build/nob.h"
 
 const char *resolve_include_file_path(String_View include_file, const char *input_file_path)
 {
@@ -77,6 +80,27 @@ bool preprocess_nob_in_file(const char *input_file_path, Nob_String_Builder *out
 
 int main(int argc, char *argv[])
 {
+    bool release_mode = false;
+    bool force_rebuild = false;
+    if(argc > 1) {
+        for(int i = 1; i < argc; ++i) {
+            if(strcmp(argv[i], "--release") == 0) {
+                release_mode = true;
+            } else if(strcmp(argv[i], "--rebuild") == 0) {
+                force_rebuild = true;
+            } else if(strcmp(argv[i], "--help") == 0) {
+                printf("USAGE: %s [FLAGS]\n", argv[0]);
+                printf("FLAGS:\n");
+                printf("   --release    Build in release mode (-O3)\n");
+                printf("   --rebuild    Always rebuild\n");
+                return 0;
+            } else {
+                fprintf(stderr, "Unknown input %s\n", argv[i]);
+                return -1;
+            }
+        }
+    }
+
 #ifdef _WIN32
     const char *output_file = "build/yue.exe";
 #else
@@ -89,8 +113,9 @@ int main(int argc, char *argv[])
         "./src/main.c",
     };
 
-    if(nob_needs_rebuild(output_file, source_files, ARRAY_LEN(source_files))) {
+    Datetime dt = datetime_now();
 
+    if(force_rebuild || nob_needs_rebuild(output_file, source_files, ARRAY_LEN(source_files))) {
         Nob_String_Builder output = {0};
         if(!preprocess_nob_in_file("./src/yue.c", &output)) {
             return false;
@@ -102,6 +127,21 @@ int main(int argc, char *argv[])
         nob_cc(&cmd);
         nob_cc_flags(&cmd);
         cmd_append(&cmd, "-D_CRT_SECURE_NO_WARNINGS");
+        cmd_append(&cmd,
+                temp_sprintf("-DYUE_BUILD_DATETIME=\"%04d-%02d-%02dT%02d:%02d:%02d\"",
+                dt.year,
+                dt.month,
+                dt.day,
+                dt.hour,
+                dt.minute,
+                dt.second));
+        if(release_mode) {
+            cmd_append(&cmd, "-DNDEBUG");
+            cmd_append(&cmd, "-O3");
+        } else {
+            cmd_append(&cmd, "-fsanitize=address");
+            cmd_append(&cmd, "-ggdb");
+        }
         nob_cc_output(&cmd, output_file);
         for(int i = 0; i < ARRAY_LEN(source_files); ++i) {
             nob_cc_inputs(&cmd, ARRAY_GET(source_files, i));
