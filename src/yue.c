@@ -1347,7 +1347,7 @@ bool parse_stmt(Parser *parser, Lexer *lex, Module *module, Function *func, int 
             } break;
         case TOKEN_FUN:
             {
-                // NOTE: we can only create new function in the top level of the file
+                // NOTE: we can only create new function in the file scope
                 if(!lexer_get_and_expect_token(lex, TOKEN_ID)) return false;
                 if(func->id > 0) {
                     lexer_diagf(loc, "Defining a new function `%s` inside another function `%s` is not allowed",

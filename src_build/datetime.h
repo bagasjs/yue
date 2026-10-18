@@ -1,3 +1,6 @@
+/// 
+/// WARNING: This is not good don't use it for serious stuff. Unless you want to fix it by yourself.
+///
 #ifndef DATETIME_H_
 #define DATETIME_H_
 
