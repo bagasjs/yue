@@ -237,11 +237,16 @@ typedef struct Runtime {
     } globals;
     shtable_t globals_nametable;
 
+    // TODO: deprecate above use below
+    Yue_Value globals_table;
+
     struct {
         Yue_Object **items;
         size_t       count;
         size_t       capacity;
     } all;
+    // TODO: We need to separate field all and globals_table are belong to 
+    //       into a new struct named HeapContext. This manages all heap we used.
 
     struct {
         CallFrame *items;
@@ -361,6 +366,8 @@ void runtime_mark_used_objects(Runtime *runtime)
             runtime_mark_object(runtime, val.objv);
     }
 
+    runtime_mark_object(runtime, runtime->globals_table.objv);
+
     // Mark objects in local variables
     for(size_t i = 0; i < runtime->call_frames.count; ++i) {
         CallFrame *frame = &runtime->call_frames.items[i];
@@ -421,6 +428,12 @@ void runtime_sweep_unused_objects(Runtime *runtime)
     }
 }
 
+static inline void runtime_trigger_gc(Runtime *runtime)
+{
+    runtime_mark_used_objects(runtime);
+    runtime_sweep_unused_objects(runtime);
+}
+
 Yue_Object *runtime_newobject(Runtime *runtime, Yue_Object_Kind kind, size_t size)
 {
     ASSERT(size >= sizeof(Yue_Object));
@@ -432,8 +445,7 @@ Yue_Object *runtime_newobject(Runtime *runtime, Yue_Object_Kind kind, size_t siz
             runtime->all.capacity = 256;
             runtime->all.items = malloc(runtime->all.capacity * sizeof(*runtime->all.items));
         } else {
-            runtime_mark_used_objects(runtime);
-            runtime_sweep_unused_objects(runtime);
+            runtime_trigger_gc(runtime);
             if(runtime->all.count + 1 > runtime->all.capacity) {
                 runtime->all.capacity *= 2;
                 void *items = malloc(runtime->all.capacity * sizeof(*runtime->all.items));
@@ -1723,6 +1735,7 @@ Yue_Context *yue_open(void)
     ctx->parser.runtime           = &ctx->runtime;
     ctx->parser.prog_arena        = &ctx->prog_arena;
     ctx->parser.temp_arena        = &ctx->temp_arena;
+    ctx->runtime.globals_table    = yue_new_table(ctx);
     return ctx;
 }
 
@@ -1770,7 +1783,6 @@ bool yue_is_table(Yue_Value value)
 
 Yue_Value yue_new_string(Yue_Context *ctx, const char *init_text)
 {
-
     Yue_Object_String *obj = (Yue_Object_String*)runtime_newobject(&ctx->runtime, YUE_OBJECT_STRING, sizeof(Yue_Object_String));
     obj->string.count    = 0;
     obj->string.capacity = 0;
@@ -1789,6 +1801,16 @@ Yue_Value yue_new_array(Yue_Context *ctx)
     obj->array.count    = 0;
     obj->array.capacity = 0;
     obj->array.items    = 0;
+    Yue_Value value = (Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj };
+    return value;
+}
+
+Yue_Value yue_new_table(Yue_Context *ctx)
+{
+    Yue_Object_Table *obj = (Yue_Object_Table*)runtime_newobject(&ctx->runtime, YUE_OBJECT_TABLE, sizeof(Yue_Object_Table));
+    obj->table.count    = 0;
+    obj->table.capacity = 0;
+    obj->table.items    = 0;
     Yue_Value value = (Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj };
     return value;
 }

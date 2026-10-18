@@ -48,7 +48,6 @@ struct Yue_Value {
 };
 
 struct Yue_Call_Info {
-
     Yue_Value *argv; // argument values
     int        argc; // count of argv
     Yue_Value  retv; // return values
@@ -93,6 +92,7 @@ bool yue_is_table(Yue_Value value);
 
 Yue_Value yue_new_string(Yue_Context *ctx, const char *init_text);
 Yue_Value yue_new_array(Yue_Context *ctx);
+Yue_Value yue_new_table(Yue_Context *ctx);
 
 Yue_String *yue_to_string(Yue_Value value);
 Yue_Array  *yue_to_array(Yue_Value value);
