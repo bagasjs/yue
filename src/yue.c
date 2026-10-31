@@ -265,8 +265,24 @@ Yue_String *yue_to_string(Yue_Value value)
 {
     if(value.kind != YUE_VALUE_OBJ) return NULL;
     if(value.objv->kind != YUE_OBJECT_STRING) return NULL;
-    Yue_Object_String *str = (Yue_Object_String*)value.objv;
-    return &str->string;
+    Yue_Object_String *obj= (Yue_Object_String*)value.objv;
+    return &obj->string;
+}
+
+Yue_Array *yue_to_array(Yue_Value value)
+{
+    if(value.kind != YUE_VALUE_OBJ)          return NULL;
+    if(value.objv->kind != YUE_OBJECT_ARRAY) return NULL;
+    Yue_Object_Array *obj = (Yue_Object_Array*)value.objv;
+    return &obj->array;
+}
+
+Yue_Table *yue_to_table(Yue_Value value)
+{
+    if(value.kind != YUE_VALUE_OBJ) return NULL;
+    if(value.objv->kind != YUE_OBJECT_TABLE) return NULL;
+    Yue_Object_Table *obj= (Yue_Object_Table*)value.objv;
+    return &obj->table;
 }
 
 void yue_array_append(Yue_Array *array, Yue_Value value)
@@ -274,62 +290,105 @@ void yue_array_append(Yue_Array *array, Yue_Value value)
     da_append(array, value);
 }
 
-void yue_table_setitem(Yue_Table *table, Yue_Value keyv, Yue_Value value)
+Yue_Value yue_array_get(Yue_Array *array, int index)
 {
-    Yue_String *key = yue_to_string(keyv);
-    ASSERT(key && "Table must be accessed with string key");
+    if(index < 0 || index >= (int)array->count) return (Yue_Value) { .kind = YUE_VALUE_NIL };
+    return array->items[index];
+}
 
+void yue_array_set(Yue_Array *array, int index, Yue_Value value)
+{
+    if(index < 0 || index >= (int)array->count) return;
+    array->items[index] = value;
+}
+
+Yue_Int yue_table_geti_ex(Yue_Table *table, const char *key, Yue_Int key_length)
+{
     for(size_t i = 0; i < table->count; ++i) {
         Yue_Table_Entry entry = table->items[i];
         Yue_String *entry_key = yue_to_string(entry.key);
-        if(cstreq(key->items, key->count, entry_key->items, entry_key->count)) {
-            table->items[i].value = value;
-            return;
+        if(cstreq(key, key_length, entry_key->items, entry_key->count)) {
+            return i;
         }
     }
+    return -1;
+}
 
-    Yue_Table_Entry entry = {0};
-    entry.key   = keyv;
-    entry.value = value;
-    da_append(table, entry); 
+Yue_Int yue_table_geti(Yue_Table *table, Yue_Value keyv)
+{
+    Yue_String *key = yue_to_string(keyv);
+    ASSERT(key && "Table must be accessed with string key");
+    return yue_table_geti_ex(table, key->items, key->count);
+}
+
+Yue_Value yue_table_get(Yue_Table *table, Yue_Int index)
+{
+    if(index < 0 || index >= (int)table->count) return (Yue_Value) { .kind = YUE_VALUE_NIL };
+    return table->items[index].value;
+}
+
+void yue_table_set(Yue_Table *table, Yue_Int index, Yue_Value value)
+{
+    if(index < 0 || index >= (int)table->count) return;
+    table->items[index].value = value;
+}
+
+Yue_Value yue_table_get_key(Yue_Table *table, Yue_Int index)
+{
+    if(index < 0 || index >= (int)table->count) return (Yue_Value) { .kind = YUE_VALUE_NIL };
+    return table->items[index].key;
+}
+
+void yue_table_setitem(Yue_Table *table, Yue_Value keyv, Yue_Value value)
+{
+    if(keyv.kind == YUE_VALUE_NIL) {
+        // TODO: maybe log that we're not accepting nil as table key
+        return;
+    }
+    int index = yue_table_geti(table, keyv);
+    if(index >= 0) {
+        yue_table_set(table, index, value);
+    } else {
+        Yue_Table_Entry entry = {0};
+        entry.key   = keyv;
+        entry.value = value;
+        da_append(table, entry); 
+    }
 }
 
 Yue_Value yue_table_getitem(Yue_Table *table, Yue_Value keyv)
 {
-    Yue_String *key = yue_to_string(keyv);
-    ASSERT(key && "Table must be accessed with string key");
-
-    for(size_t i = 0; i < table->count; ++i) {
-        Yue_Table_Entry entry = table->items[i];
-        Yue_String *entry_key = yue_to_string(entry.key);
-        if(cstreq(key->items, key->count, entry_key->items, entry_key->count)) {
-            return table->items[i].value;
-        }
-    }
-    Yue_Value nil = { .kind = YUE_VALUE_NIL };
-    return nil;
+    int index = yue_table_geti(table, keyv);
+    return yue_table_get(table, index);
 }
 
 bool runtime_hasglobal(Runtime *runtime, const char *name)
 {
-    return (intptr_t)(void*)shtable_geti(&runtime->globals_nametable, name) >= 0;
+    Yue_Table *table = yue_to_table(runtime->globals_table);
+    size_t len = cstrlen(name);
+    return yue_table_geti_ex(table, name, len) >= 0;
 }
 
 int runtime_getglobal(Runtime *runtime, const char *name)
 {
-    return (intptr_t)shtable_get_or(&runtime->globals_nametable, name, (void*)-1);
+    Yue_Table *table = yue_to_table(runtime->globals_table);
+    size_t len = cstrlen(name);
+    int index = yue_table_geti_ex(table, name, len);
+    return index;
 }
 
 void runtime_setglobal(Runtime *runtime, const char *name, Yue_Value value)
 {
-    int shtable_item_slot = shtable_geti(&runtime->globals_nametable, name);
-    if(shtable_item_slot < 0) {
-        int global = runtime->globals.count;
-        sa_append(&runtime->globals, value);
-        shtable_set(&runtime->globals_nametable, name, (void*)(intptr_t)global);
+    Yue_Table *table = yue_to_table(runtime->globals_table);
+    size_t len = cstrlen(name);
+    int index = yue_table_geti_ex(table, name, len);
+    if(index >= 0) {
+        yue_table_set(table, index, value);
     } else {
-        int global = (intptr_t)runtime->globals_nametable.items[shtable_item_slot].value;
-        runtime->globals.items[global] = value;
+        Yue_Table_Entry entry = {0};
+        entry.key   = ; // TODO: assign a key
+        entry.value = value;
+        da_append(table, entry); 
     }
 }
 
@@ -540,32 +599,32 @@ void print_value(Yue_Value *values, size_t count, const char *endline, int level
                     switch(a.objv->kind) {
                         case YUE_OBJECT_STRING:
                             {
-                                Yue_Object_String *str = (Yue_Object_String*)a.objv;
+                                Yue_String *str = yue_to_string(a);
                                 if(level > 0) {
-                                    printf("\"%.*s\"", (int)str->string.count, str->string.items);
+                                    printf("\"%.*s\"", (int)str->count, str->items);
                                 } else {
-                                    printf("%.*s", (int)str->string.count, str->string.items);
+                                    printf("%.*s", (int)str->count, str->items);
                                 }
                             } break;
                         case YUE_OBJECT_ARRAY:
                             {
-                                Yue_Array array = ((Yue_Object_Array*)a.objv)->array;
+                                Yue_Array *array = yue_to_array(a);
                                 printf("[ ");
-                                for(size_t i = 0; i < array.count; ++i) {
-                                    Yue_Value value = array.items[i];
+                                for(size_t i = 0; i < array->count; ++i) {
+                                    Yue_Value value = yue_array_get(array, i);
                                     print_value(&value, 1, ", ", level + 1);
                                 }
                                 printf("]");
                             } break;
                         case YUE_OBJECT_TABLE:
                             {
-
-                                Yue_Table table = ((Yue_Object_Table*)a.objv)->table;
+                                Yue_Table *table = yue_to_table(a);
                                 printf("{ ");
-                                for(size_t i = 0; i < table.count; ++i) {
-                                    Yue_Table_Entry entry = table.items[i];
-                                    print_value(&entry.key, 1, " : ", level + 1);
-                                    print_value(&entry.value, 1, ", ", level + 1);
+                                for(size_t i = 0; i < table->count; ++i) {
+                                    Yue_Value value = yue_table_get(table, i);
+                                    Yue_Value key   = yue_table_get_key(table, i);
+                                    print_value(&key, 1, " : ", level + 1);
+                                    print_value(&value, 1, ", ", level + 1);
                                 }
                                 printf("}");
                             } break;
@@ -683,8 +742,8 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                         } break;
                     case YUE_OBJECT_TABLE:
                         {
-                            Yue_Object_Table *table = (Yue_Object_Table*)obj.objv;
-                            yue_table_setitem(&table->table, idx, val);
+                            Yue_Table *table = yue_to_table(obj);
+                            yue_table_setitem(table, idx, val);
                         } break;
                     default:
                         ASSERT(0 && "SET_ITEM Unreachable");
@@ -727,8 +786,8 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                         } break;
                     case YUE_OBJECT_TABLE:
                         {
-                            Yue_Object_Table *table = (Yue_Object_Table*)obj.objv;
-                            Yue_Value result = yue_table_getitem(&table->table, idx);
+                            Yue_Table *table = yue_to_table(obj);
+                            Yue_Value result = yue_table_getitem(table, idx);
                             frame->stack[frame->sp++] = result;
                         } break;
                     default:
@@ -1843,12 +1902,6 @@ Yue_Value yue_new_table(Yue_Context *ctx)
     obj->table.items    = 0;
     Yue_Value value = (Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj };
     return value;
-}
-
-Yue_Array *yue_to_array(Yue_Value value)
-{
-    Yue_Object_Array *obj = (Yue_Object_Array*)value.objv;
-    return &obj->array;
 }
 
 static void reset_parser_state(Yue_Context *ctx)

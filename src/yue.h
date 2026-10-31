@@ -5,9 +5,9 @@
 
 #define YUE_VERSION_MAJOR    0
 #define YUE_VERSION_MINOR    1
-#define YUE_VERSION_REVISION 0
+#define YUE_VERSION_REVISION 1
 
-typedef int   Yue_Int;
+typedef int Yue_Int;
 typedef float Yue_Flt;
 
 typedef struct Yue_Context Yue_Context;
@@ -80,25 +80,6 @@ typedef struct Yue_Table {
     size_t  capacity;
 } Yue_Table;
 
-// The Garbage Collector of Yue
-typedef struct Yue_HeapContext {
-    Yue_Value globals_table;
-    struct {
-        Yue_Object **items;
-        size_t       count;
-        size_t       capacity;
-    } objects;
-} Yue_HeapContext;
-
-typedef struct Yue_CallFrame {
-    const char *function_name;
-    Yue_Value   stack[1024];
-} Yue_CallFrame;
-
-typedef struct Yue_Runtime {
-
-} Yue_Runtime;
-
 Yue_Context *yue_open(void);
 void         yue_close(Yue_Context *ctx);
 
@@ -118,9 +99,15 @@ Yue_Value yue_new_table(Yue_Context *ctx);
 Yue_String *yue_to_string(Yue_Value value);
 Yue_Array  *yue_to_array(Yue_Value value);
 
-/// Object Operations (yue_objects.c)
-void yue_array_append(Yue_Array *array, Yue_Value item);
-void yue_array_insert(Yue_Array *array, Yue_Value item);
+void      yue_array_append(Yue_Array *array, Yue_Value item);
+Yue_Value yue_array_get   (Yue_Array *array, int index);
+void      yue_array_set   (Yue_Array *array, int index, Yue_Value value);
+
+Yue_Int   yue_table_geti_ex(Yue_Table *table, const char *key, Yue_Int key_length);
+Yue_Int   yue_table_geti   (Yue_Table *table, Yue_Value key); // get the index of a key within the table
+Yue_Value yue_table_get_key(Yue_Table *table, Yue_Int index);
+void      yue_table_set    (Yue_Table *table, Yue_Int index, Yue_Value value);
+Yue_Value yue_table_get    (Yue_Table *table, Yue_Int index);
 void      yue_table_setitem(Yue_Table *table, Yue_Value key, Yue_Value value);
 Yue_Value yue_table_getitem(Yue_Table *table, Yue_Value key);
 
