@@ -230,13 +230,6 @@ typedef struct CallFrame {
 } CallFrame;
 
 typedef struct Runtime {
-    struct {
-        Yue_Value *items;
-        size_t     count;
-        size_t     capacity;
-    } globals;
-    shtable_t globals_nametable;
-
     // TODO: deprecate above use below
     Yue_Value globals_table;
 
@@ -302,6 +295,10 @@ void yue_array_set(Yue_Array *array, int index, Yue_Value value)
     array->items[index] = value;
 }
 
+// TODO: our current string implementation kinda fucked up
+//       look at runtime_setglobal/runtime_getglobal that uses yue_table_geti_ex
+//       it sets the key_length + 1 because Yue_String in runtime_pushnewstring
+//       also pushed the null-terminator
 Yue_Int yue_table_geti_ex(Yue_Table *table, const char *key, Yue_Int key_length)
 {
     for(size_t i = 0; i < table->count; ++i) {
@@ -362,36 +359,6 @@ Yue_Value yue_table_getitem(Yue_Table *table, Yue_Value keyv)
     return yue_table_get(table, index);
 }
 
-bool runtime_hasglobal(Runtime *runtime, const char *name)
-{
-    Yue_Table *table = yue_to_table(runtime->globals_table);
-    size_t len = cstrlen(name);
-    return yue_table_geti_ex(table, name, len) >= 0;
-}
-
-int runtime_getglobal(Runtime *runtime, const char *name)
-{
-    Yue_Table *table = yue_to_table(runtime->globals_table);
-    size_t len = cstrlen(name);
-    int index = yue_table_geti_ex(table, name, len);
-    return index;
-}
-
-void runtime_setglobal(Runtime *runtime, const char *name, Yue_Value value)
-{
-    Yue_Table *table = yue_to_table(runtime->globals_table);
-    size_t len = cstrlen(name);
-    int index = yue_table_geti_ex(table, name, len);
-    if(index >= 0) {
-        yue_table_set(table, index, value);
-    } else {
-        Yue_Table_Entry entry = {0};
-        entry.key   = ; // TODO: assign a key
-        entry.value = value;
-        da_append(table, entry); 
-    }
-}
-
 void runtime_mark_object(Runtime *runtime, Yue_Object *object)
 {
     if(object->marked) return;
@@ -425,12 +392,6 @@ void runtime_mark_object(Runtime *runtime, Yue_Object *object)
 void runtime_mark_used_objects(Runtime *runtime)
 {
     // Mark objects in global variables
-    for(size_t i = 0; i < runtime->globals.count; ++i) {
-        Yue_Value val = runtime->globals.items[i];
-        if(val.kind == YUE_VALUE_OBJ) 
-            runtime_mark_object(runtime, val.objv);
-    }
-
     runtime_mark_object(runtime, runtime->globals_table.objv);
 
     // Mark objects in local variables
@@ -571,6 +532,46 @@ Yue_Object *runtime_push_new_table(Runtime *runtime, CallFrame *frame, int slurp
     frame->sp -= slurp_n;
     frame->stack[frame->sp++] = ((Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj });
     return (Yue_Object*)obj;
+}
+
+void print_value(Yue_Value *values, size_t count, const char *endline, int level);
+bool runtime_hasglobal(Runtime *runtime, const char *name)
+{
+    Yue_Table *table = yue_to_table(runtime->globals_table);
+    size_t len = cstrlen(name);
+    int index = yue_table_geti_ex(table, name, len + 1);
+    return index >= 0;
+}
+
+int runtime_getglobal(Runtime *runtime, const char *name)
+{
+    Yue_Table *table = yue_to_table(runtime->globals_table);
+    size_t len = cstrlen(name);
+    int index = yue_table_geti_ex(table, name, len + 1);
+    return index;
+}
+
+void runtime_setglobal(Runtime *runtime, const char *name, Yue_Value value)
+{
+    Yue_Table *table = yue_to_table(runtime->globals_table);
+    size_t len = cstrlen(name);
+    int index = yue_table_geti_ex(table, name, len + 1);
+    if(index >= 0) {
+        yue_table_set(table, index, value);
+    } else {
+        Yue_Object_String *obj = (Yue_Object_String*)runtime_newobject(runtime, YUE_OBJECT_STRING, sizeof(Yue_Object_String));
+        obj->string.count    = 0;
+        obj->string.capacity = 0;
+        obj->string.items    = 0;
+        if(name) {
+            da_append_many(&obj->string, name, cstrlen(name));
+            da_append(&obj->string, 0);
+        }
+        Yue_Table_Entry entry = {0};
+        entry.key   = (Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj };
+        entry.value = value;
+        da_append(table, entry); 
+    }
 }
 
 void print_value(Yue_Value *values, size_t count, const char *endline, int level)
@@ -941,7 +942,8 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
 
             case OP_GLOBAL_GET:
                 {
-                    Yue_Value value = runtime->globals.items[inst.arg];
+                    Yue_Table *globals = yue_to_table(runtime->globals_table);
+                    Yue_Value value = yue_table_get(globals, inst.arg);
                     frame->stack[frame->sp++] = value;
                 } break;
 
@@ -1815,9 +1817,6 @@ Yue_Context *yue_open(void)
 {
     Yue_Context *ctx = malloc(sizeof(*ctx));
     bufset(ctx, 0, sizeof(*ctx));
-
-    ctx->runtime.globals.items    = ctx->globals;
-    ctx->runtime.globals.capacity = ARRLEN(ctx->globals);
     ctx->parser.runtime           = &ctx->runtime;
     ctx->parser.prog_arena        = &ctx->prog_arena;
     ctx->parser.temp_arena        = &ctx->temp_arena;
