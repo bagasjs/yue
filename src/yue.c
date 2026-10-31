@@ -295,10 +295,6 @@ void yue_array_set(Yue_Array *array, int index, Yue_Value value)
     array->items[index] = value;
 }
 
-// TODO: our current string implementation kinda fucked up
-//       look at runtime_setglobal/runtime_getglobal that uses yue_table_geti_ex
-//       it sets the key_length + 1 because Yue_String in runtime_pushnewstring
-//       also pushed the null-terminator
 Yue_Int yue_table_geti_ex(Yue_Table *table, const char *key, Yue_Int key_length)
 {
     for(size_t i = 0; i < table->count; ++i) {
@@ -465,7 +461,7 @@ Yue_Object *runtime_newobject(Runtime *runtime, Yue_Object_Kind kind, size_t siz
     ASSERT(size >= sizeof(Yue_Object));
     Yue_Object *obj  = malloc(size);
     obj->kind = kind;
-    obj->marked = false;
+    obj->marked = true; // mark every newly created object
     if(runtime->all.count + 1 > runtime->all.capacity) {
         if(runtime->all.capacity == 0) {
             runtime->all.capacity = 256;
@@ -486,17 +482,25 @@ Yue_Object *runtime_newobject(Runtime *runtime, Yue_Object_Kind kind, size_t siz
     return obj;
 }
 
-Yue_Object *runtime_pushnewstring(Runtime *runtime, CallFrame *frame, const char *init_text)
+Yue_Object *runtime_new_string(Runtime *runtime, const char *init_text)
 {
     Yue_Object_String *obj = (Yue_Object_String*)runtime_newobject(runtime, YUE_OBJECT_STRING, sizeof(Yue_Object_String));
     obj->string.count    = 0;
     obj->string.capacity = 0;
     obj->string.items    = 0;
     if(init_text) {
-        da_append_many(&obj->string, init_text, cstrlen(init_text));
-        da_append(&obj->string, 0);
+        size_t count = cstrlen(init_text);
+        da_reserve(&obj->string, count + 1);
+        bufcpy(obj->string.items, init_text, count);
+        obj->string.items[count] = 0;
+        obj->string.count = count;
     }
+    return (Yue_Object*)obj;
+}
 
+Yue_Object *runtime_pushnewstring(Runtime *runtime, CallFrame *frame, const char *init_text)
+{
+    Yue_Object *obj = runtime_new_string(runtime, init_text);
     frame->stack[frame->sp++] = ((Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj });
     return (Yue_Object*)obj;
 }
@@ -539,7 +543,7 @@ bool runtime_hasglobal(Runtime *runtime, const char *name)
 {
     Yue_Table *table = yue_to_table(runtime->globals_table);
     size_t len = cstrlen(name);
-    int index = yue_table_geti_ex(table, name, len + 1);
+    int index = yue_table_geti_ex(table, name, len);
     return index >= 0;
 }
 
@@ -547,7 +551,7 @@ int runtime_getglobal(Runtime *runtime, const char *name)
 {
     Yue_Table *table = yue_to_table(runtime->globals_table);
     size_t len = cstrlen(name);
-    int index = yue_table_geti_ex(table, name, len + 1);
+    int index = yue_table_geti_ex(table, name, len);
     return index;
 }
 
@@ -555,18 +559,11 @@ void runtime_setglobal(Runtime *runtime, const char *name, Yue_Value value)
 {
     Yue_Table *table = yue_to_table(runtime->globals_table);
     size_t len = cstrlen(name);
-    int index = yue_table_geti_ex(table, name, len + 1);
+    int index = yue_table_geti_ex(table, name, len);
     if(index >= 0) {
         yue_table_set(table, index, value);
     } else {
-        Yue_Object_String *obj = (Yue_Object_String*)runtime_newobject(runtime, YUE_OBJECT_STRING, sizeof(Yue_Object_String));
-        obj->string.count    = 0;
-        obj->string.capacity = 0;
-        obj->string.items    = 0;
-        if(name) {
-            da_append_many(&obj->string, name, cstrlen(name));
-            da_append(&obj->string, 0);
-        }
+        Yue_Object *obj = runtime_new_string(runtime, name);
         Yue_Table_Entry entry = {0};
         entry.key   = (Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj };
         entry.value = value;
@@ -1868,15 +1865,7 @@ bool yue_is_table(Yue_Value value)
 
 Yue_Value yue_new_string(Yue_Context *ctx, const char *init_text)
 {
-    Yue_Object_String *obj = (Yue_Object_String*)runtime_newobject(&ctx->runtime, YUE_OBJECT_STRING, sizeof(Yue_Object_String));
-    obj->base.marked     = true; // since it's new mark it
-    obj->string.count    = 0;
-    obj->string.capacity = 0;
-    obj->string.items    = 0;
-    if(init_text) {
-        da_append_many(&obj->string, init_text, cstrlen(init_text));
-        da_append(&obj->string, 0);
-    }
+    Yue_Object *obj = runtime_new_string(&ctx->runtime, init_text);
     Yue_Value value = (Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj };
     return value;
 }
