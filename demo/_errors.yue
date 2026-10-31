@@ -1,7 +1,6 @@
-fun test(a) {
-    return a*a
-}
-fun bar() {
-    print(test(10))
-}
-bar()
+var a = [10, 20, 30]
+var i = 0 - 1
+print(a[i])          // reads items[-1]
+
+var j = 0 - 100000
+a[j] = 99            // writes ~1.6 MB before the buffer -> SEGV

@@ -163,7 +163,7 @@ int find_or_add_cstr_in_module(Module *module, const char *text)
 {
     size_t text_count = cstrlen(text);
 
-    int i = 0;
+    size_t i = 0;
     char *strconsts = module->strconsts.items;
     while(i < module->strconsts.count) {
         const char *str = &strconsts[i];
@@ -254,6 +254,12 @@ typedef struct Runtime {
         size_t capacity;
     } call_frames;
 } Runtime;
+
+// TODO: If we want to separate GC and Runtime maybe we can do it like this
+//       typedef struct {
+//       } HeapContext;
+//       void heap_context_mark_object(GC *gc, Yue_Object *object);
+//       void heap_context_mark_used_objects_by_runtime(GC *gc, Runtime *runtime);
 
 Yue_String *yue_to_string(Yue_Value value)
 {
@@ -591,7 +597,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
     frame->trigger_loc = loc;
 
     if(argc != func->params_count) {
-        lexer_diagf(loc, "Function `%s` expects %zu arguments but got %zu\n", func->params_count, argc);
+        lexer_diagf(loc, "Function `%s` expects %zu arguments but got %zu\n", func->name, func->params_count, argc);
         return false;
     }
     for(size_t i = 0; i < argc; ++i) {
@@ -674,6 +680,8 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                         } break;
                     default:
                         ASSERT(0 && "SET_ITEM Unreachable");
+                        lexer_diagf(inst.loc, "SET_ITEM unreachable");
+                        return false;
                     }
                 } break;
             case OP_GET_ITEM:
@@ -791,7 +799,10 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                 {
                     Yue_Value a = frame->stack[--frame->sp];
                     Yue_Value b = frame->stack[--frame->sp];
-                    ASSERT(a.kind == b.kind && a.kind == YUE_VALUE_INT);
+                    if(!(a.kind == b.kind && a.kind == YUE_VALUE_INT)) {
+                        lexer_diagf(inst.loc, "Calling a value that's not a function");
+                        return false;
+                    }
                     switch(inst.opcode) {
                     case OP_ADD:
                         b.intv += a.intv;
@@ -1784,6 +1795,7 @@ bool yue_is_table(Yue_Value value)
 Yue_Value yue_new_string(Yue_Context *ctx, const char *init_text)
 {
     Yue_Object_String *obj = (Yue_Object_String*)runtime_newobject(&ctx->runtime, YUE_OBJECT_STRING, sizeof(Yue_Object_String));
+    obj->base.marked     = true; // since it's new mark it
     obj->string.count    = 0;
     obj->string.capacity = 0;
     obj->string.items    = 0;
@@ -1798,6 +1810,7 @@ Yue_Value yue_new_string(Yue_Context *ctx, const char *init_text)
 Yue_Value yue_new_array(Yue_Context *ctx)
 {
     Yue_Object_Array *obj = (Yue_Object_Array*)runtime_newobject(&ctx->runtime, YUE_OBJECT_ARRAY, sizeof(Yue_Object_Array));
+    obj->base.marked    = true; // since it's new mark it
     obj->array.count    = 0;
     obj->array.capacity = 0;
     obj->array.items    = 0;
@@ -1808,6 +1821,7 @@ Yue_Value yue_new_array(Yue_Context *ctx)
 Yue_Value yue_new_table(Yue_Context *ctx)
 {
     Yue_Object_Table *obj = (Yue_Object_Table*)runtime_newobject(&ctx->runtime, YUE_OBJECT_TABLE, sizeof(Yue_Object_Table));
+    obj->base.marked    = true; // since it's new mark it
     obj->table.count    = 0;
     obj->table.capacity = 0;
     obj->table.items    = 0;
@@ -1844,3 +1858,4 @@ int yue_do_string(Yue_Context *ctx, const char *file, const char *source, size_t
 /// 2. Table feature
 ///     a. How do I iterate table?
 /// 3. Currently string is kinda sucks, its count might include null term or might not include
+/// 4. More efficient runtime and smaller codebase
