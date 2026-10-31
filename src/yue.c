@@ -662,6 +662,10 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                         {
                             ASSERT(idx.kind == YUE_VALUE_INT);
                             Yue_Object_Array *arr = (Yue_Object_Array*)obj.objv;
+                            if(idx.intv < 0)  {
+                                lexer_diagf(inst.loc, "Accessing array content with negative index");
+                                return false;
+                            }
                             if(idx.intv < (int)arr->array.count) 
                                 arr->array.items[idx.intv] = val;
                         } break;
@@ -670,6 +674,10 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                             ASSERT(idx.kind == YUE_VALUE_INT);
                             ASSERT(val.kind == YUE_VALUE_INT);
                             Yue_Object_String *str = (Yue_Object_String*)obj.objv;
+                            if(idx.intv < 0)  {
+                                lexer_diagf(inst.loc, "Accessing array content with negative index");
+                                return false;
+                            }
                             if(idx.intv < (int)str->string.count) 
                                 str->string.items[idx.intv] = (char)val.intv;
                         } break;
@@ -696,6 +704,10 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                             Yue_Object_Array *arr = (Yue_Object_Array*)obj.objv;
                             ASSERT(idx.kind == YUE_VALUE_INT);
                             Yue_Value result = {0};
+                            if(idx.intv < 0)  {
+                                lexer_diagf(inst.loc, "Accessing array content with negative index");
+                                return false;
+                            }
                             if(idx.intv < (int)arr->array.count) 
                                 result = arr->array.items[idx.intv];
                             frame->stack[frame->sp++] = result;
@@ -705,6 +717,10 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                             ASSERT(idx.kind == YUE_VALUE_INT);
                             Yue_Object_String *str = (Yue_Object_String*)obj.objv;
                             Yue_Value result = {0};
+                            if(idx.intv < 0)  {
+                                lexer_diagf(inst.loc, "Accessing string content with negative index");
+                                return false;
+                            }
                             if(idx.intv < (int)str->string.count) 
                                 result = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = str->string.items[idx.intv] };
                             frame->stack[frame->sp++] = result;

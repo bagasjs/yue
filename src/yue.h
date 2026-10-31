@@ -66,17 +66,38 @@ typedef struct Yue_Array {
     size_t     capacity;
 } Yue_Array;
 
+
 typedef struct Yue_Table_Entry {
     // Although it's Yue_Value it must be YUE_OBJECT_STRING
     Yue_Value key;
     Yue_Value value;
 } Yue_Table_Entry;
 
+// NOTE: Table in Yue must have stable indices
 typedef struct Yue_Table {
     Yue_Table_Entry *items;
     size_t  count;
     size_t  capacity;
 } Yue_Table;
+
+// The Garbage Collector of Yue
+typedef struct Yue_HeapContext {
+    Yue_Value globals_table;
+    struct {
+        Yue_Object **items;
+        size_t       count;
+        size_t       capacity;
+    } objects;
+} Yue_HeapContext;
+
+typedef struct Yue_CallFrame {
+    const char *function_name;
+    Yue_Value   stack[1024];
+} Yue_CallFrame;
+
+typedef struct Yue_Runtime {
+
+} Yue_Runtime;
 
 Yue_Context *yue_open(void);
 void         yue_close(Yue_Context *ctx);
