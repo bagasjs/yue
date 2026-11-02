@@ -307,18 +307,6 @@ Yue_Result yue_array_set(Yue_Array *array, int index, Yue_Value value)
     return YUE_OK;
 }
 
-Yue_Int yue_table_geti_ex(Yue_Table *table, const char *key, Yue_Int key_length)
-{
-    for(size_t i = 0; i < table->count; ++i) {
-        Yue_Table_Entry entry = table->items[i];
-        Yue_String *entry_key = yue_to_string(entry.key);
-        if(cstreq(key, key_length, entry_key->items, entry_key->count)) {
-            return i;
-        }
-    }
-    return -1;
-}
-
 Yue_Result yue_table_geti_v2(Yue_Table *table, Yue_Int *out_index, const char *key, Yue_Int key_length)
 {
     if(!out_index) return YUE_ERROR_INVALID_ARGUMENT;
@@ -343,7 +331,12 @@ Yue_Result yue_table_geti_v1(Yue_Table *table, Yue_Int *out_index, Yue_Value key
 Yue_Int yue_table_geti(Yue_Table *table, Yue_Value keyv)
 {
     Yue_Int result_index = -1;
-    ASSERT(yue_table_geti_v1(table, &result_index, keyv) == YUE_OK);
+    Yue_Result result = yue_table_geti_v1(table, &result_index, keyv);
+    switch(result) {
+    case YUE_OK: return result_index;
+    case YUE_ERROR_KEY_NOT_FOUND: return -1;
+    default: ASSERT(0 && "ERROR");
+    }
     return result_index;
 }
 
@@ -385,13 +378,20 @@ Yue_Result yue_table_setitem(Yue_Table *table, Yue_Value keyv, Yue_Value value)
 {
     if(keyv.kind == YUE_VALUE_NIL) return YUE_ERROR_INVALID_KEY;
 
-    int index = yue_table_geti(table, keyv);
-    if(index >= 0) return yue_table_set(table, index, value);
-    else {
-        Yue_Table_Entry entry = {0};
-        entry.key   = keyv;
-        entry.value = value;
-        da_append(table, entry); 
+    Yue_Int index = -1;
+    Yue_Result result = yue_table_geti_v1(table, &index, keyv);
+    switch(result) {
+    case YUE_OK:
+        return yue_table_set(table, index, value);
+    case YUE_ERROR_KEY_NOT_FOUND:
+        {
+            Yue_Table_Entry entry = {0};
+            entry.key   = keyv;
+            entry.value = value;
+            da_append(table, entry); 
+        } break;
+    default:
+        return result;
     }
     return YUE_OK;
 }
@@ -599,31 +599,55 @@ bool runtime_hasglobal(Runtime *runtime, const char *name)
 {
     Yue_Table *table = yue_to_table(runtime->globals_table);
     size_t len = cstrlen(name);
-    int index = yue_table_geti_ex(table, name, len);
-    return index >= 0;
+    Yue_Int index = -1;
+    Yue_Result result = yue_table_geti_v2(table, &index, name, len);
+    switch(result) {
+    case YUE_OK:
+        return true;
+    case YUE_ERROR_KEY_NOT_FOUND:
+        return false;
+    default:
+        ASSERT(0 && "NOT FOUND");
+        return false;
+    }
 }
 
 int runtime_getglobal(Runtime *runtime, const char *name)
 {
     Yue_Table *table = yue_to_table(runtime->globals_table);
     size_t len = cstrlen(name);
-    int index = yue_table_geti_ex(table, name, len);
-    return index;
+    Yue_Int index = -1;
+    Yue_Result result = yue_table_geti_v2(table, &index, name, len);
+    switch(result) {
+    case YUE_OK:
+        return index;
+    default:
+        return -1;
+    }
 }
 
 void runtime_setglobal(Runtime *runtime, const char *name, Yue_Value value)
 {
     Yue_Table *table = yue_to_table(runtime->globals_table);
     size_t len = cstrlen(name);
-    int index = yue_table_geti_ex(table, name, len);
-    if(index >= 0) {
-        yue_table_set(table, index, value);
-    } else {
-        Yue_Object *obj = runtime_new_string(runtime, name);
-        Yue_Table_Entry entry = {0};
-        entry.key   = (Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj };
-        entry.value = value;
-        da_append(table, entry); 
+
+    Yue_Int index = -1;
+    Yue_Result result = yue_table_geti_v2(table, &index, name, len);
+    switch(result) {
+    case YUE_OK:
+        ASSERT(yue_table_set(table, index, value) == YUE_OK);
+        break;
+    case YUE_ERROR_KEY_NOT_FOUND:
+        {
+            Yue_Object *obj = runtime_new_string(runtime, name);
+            Yue_Table_Entry entry = {0};
+            entry.key   = (Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj };
+            entry.value = value;
+            da_append(table, entry); 
+        } break;
+    default:
+        ASSERT(0 && "ERROR");
+        break;
     }
 }
 
