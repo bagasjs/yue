@@ -62,7 +62,7 @@ bool f_len(Yue_Context *ctx, Yue_Call_Info *info)
 
 bool f_putchar(Yue_Context *ctx, Yue_Call_Info *info)
 {
-    ASSERT(info->argc == 1 && "len expect more than 1 arguments");
+    ASSERT(info->argc == 1 && "putchar expect more than 1 arguments");
     ASSERT(info->argv[0].kind == YUE_VALUE_INT);
     putchar(info->argv[0].intv);
     return true;
@@ -151,5 +151,4 @@ int main(int argc, char *argv[])
     yue_close(ctx);
     return 0;
 }
-
 

@@ -94,7 +94,19 @@ const char *opcode_names[] = {
 typedef struct {
     Loc    loc;
     Opcode opcode;
-    int    arg;
+    // TODO: it would be cool if we name arg differently
+    union {
+        // integer literal value
+        int intlv;
+        // integer constant index
+        int intci; 
+        // float constant index
+        int fltci;
+        // string constant index
+        int strci;
+        // generic argument
+        int arg;
+    };
 } Inst;
 
 static inline Inst make_inst(Opcode opcode, int arg, Loc loc) {
@@ -230,7 +242,6 @@ typedef struct CallFrame {
 } CallFrame;
 
 typedef struct Runtime {
-    // TODO: deprecate above use below
     Yue_Value globals_table;
 
     struct {
@@ -289,10 +300,11 @@ Yue_Value yue_array_get(Yue_Array *array, int index)
     return array->items[index];
 }
 
-void yue_array_set(Yue_Array *array, int index, Yue_Value value)
+Yue_Result yue_array_set(Yue_Array *array, int index, Yue_Value value)
 {
-    if(index < 0 || index >= (int)array->count) return;
+    if(index < 0 || index >= (int)array->count) return YUE_ERROR_INVALID_INDEX;
     array->items[index] = value;
+    return YUE_OK;
 }
 
 Yue_Int yue_table_geti_ex(Yue_Table *table, const char *key, Yue_Int key_length)
@@ -307,11 +319,40 @@ Yue_Int yue_table_geti_ex(Yue_Table *table, const char *key, Yue_Int key_length)
     return -1;
 }
 
-Yue_Int yue_table_geti(Yue_Table *table, Yue_Value keyv)
+Yue_Result yue_table_geti_v2(Yue_Table *table, Yue_Int *out_index, const char *key, Yue_Int key_length)
+{
+    if(!out_index) return YUE_ERROR_INVALID_ARGUMENT;
+
+    for(size_t i = 0; i < table->count; ++i) {
+        Yue_Table_Entry entry = table->items[i];
+        Yue_String *entry_key = yue_to_string(entry.key);
+        if(cstreq(key, key_length, entry_key->items, entry_key->count)) {
+            *out_index = i;
+            return YUE_OK;
+        }
+    }
+    return YUE_ERROR_KEY_NOT_FOUND;
+}
+
+Yue_Result yue_table_geti_v1(Yue_Table *table, Yue_Int *out_index, Yue_Value keyv)
 {
     Yue_String *key = yue_to_string(keyv);
-    ASSERT(key && "Table must be accessed with string key");
-    return yue_table_geti_ex(table, key->items, key->count);
+    return yue_table_geti_v2(table, out_index, key->items, key->count);
+}
+
+Yue_Int yue_table_geti(Yue_Table *table, Yue_Value keyv)
+{
+    Yue_Int result_index = -1;
+    ASSERT(yue_table_geti_v1(table, &result_index, keyv) == YUE_OK);
+    return result_index;
+}
+
+Yue_Result yue_table_get_v1(Yue_Table *table, Yue_Value *out_value, Yue_Int index)
+{
+    if(!out_value) return YUE_ERROR_INVALID_ARGUMENT;
+    if(index < 0 || index >= (int)table->count) return YUE_ERROR_INVALID_INDEX;
+    *out_value = table->items[index].value;
+    return YUE_OK;
 }
 
 Yue_Value yue_table_get(Yue_Table *table, Yue_Int index)
@@ -320,39 +361,55 @@ Yue_Value yue_table_get(Yue_Table *table, Yue_Int index)
     return table->items[index].value;
 }
 
-void yue_table_set(Yue_Table *table, Yue_Int index, Yue_Value value)
+Yue_Result yue_table_set(Yue_Table *table, Yue_Int index, Yue_Value value)
 {
-    if(index < 0 || index >= (int)table->count) return;
+    if(index < 0 || index >= (int)table->count) return YUE_ERROR_INVALID_INDEX;
     table->items[index].value = value;
+    return YUE_OK;
 }
 
-Yue_Value yue_table_get_key(Yue_Table *table, Yue_Int index)
+Yue_Result yue_table_getkey_v1(Yue_Table *table, Yue_Value *out_key, Yue_Int index)
+{
+    if(index < 0 || index >= (int)table->count) return YUE_ERROR_INVALID_INDEX;
+    *out_key = table->items[index].key;
+    return YUE_OK;
+}
+
+Yue_Value yue_table_getkey(Yue_Table *table, Yue_Int index)
 {
     if(index < 0 || index >= (int)table->count) return (Yue_Value) { .kind = YUE_VALUE_NIL };
     return table->items[index].key;
 }
 
-void yue_table_setitem(Yue_Table *table, Yue_Value keyv, Yue_Value value)
+Yue_Result yue_table_setitem(Yue_Table *table, Yue_Value keyv, Yue_Value value)
 {
-    if(keyv.kind == YUE_VALUE_NIL) {
-        // TODO: maybe log that we're not accepting nil as table key
-        return;
-    }
+    if(keyv.kind == YUE_VALUE_NIL) return YUE_ERROR_INVALID_KEY;
+
     int index = yue_table_geti(table, keyv);
-    if(index >= 0) {
-        yue_table_set(table, index, value);
-    } else {
+    if(index >= 0) return yue_table_set(table, index, value);
+    else {
         Yue_Table_Entry entry = {0};
         entry.key   = keyv;
         entry.value = value;
         da_append(table, entry); 
     }
+    return YUE_OK;
 }
 
 Yue_Value yue_table_getitem(Yue_Table *table, Yue_Value keyv)
 {
     int index = yue_table_geti(table, keyv);
     return yue_table_get(table, index);
+}
+
+Yue_Result yue_table_getitem_v1(Yue_Table *table, Yue_Value *out_value, Yue_Value key)
+{
+    Yue_Result result = YUE_OK;
+    Yue_Int    index = 0;
+    result = yue_table_geti_v1(table, &index, key);
+    if(result != YUE_OK) return result;
+    result = yue_table_get_v1(table, out_value, index);
+    return result;
 }
 
 void runtime_mark_object(Runtime *runtime, Yue_Object *object)
@@ -538,7 +595,6 @@ Yue_Object *runtime_push_new_table(Runtime *runtime, CallFrame *frame, int slurp
     return (Yue_Object*)obj;
 }
 
-void print_value(Yue_Value *values, size_t count, const char *endline, int level);
 bool runtime_hasglobal(Runtime *runtime, const char *name)
 {
     Yue_Table *table = yue_to_table(runtime->globals_table);
@@ -620,7 +676,7 @@ void print_value(Yue_Value *values, size_t count, const char *endline, int level
                                 printf("{ ");
                                 for(size_t i = 0; i < table->count; ++i) {
                                     Yue_Value value = yue_table_get(table, i);
-                                    Yue_Value key   = yue_table_get_key(table, i);
+                                    Yue_Value key   = yue_table_getkey(table, i);
                                     print_value(&key, 1, " : ", level + 1);
                                     print_value(&value, 1, ", ", level + 1);
                                 }
@@ -703,9 +759,8 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                 runtime_pushnewarray(runtime, frame, inst.arg);
                 break;
             case OP_NEW_TABLE:
-                {
-                    runtime_push_new_table(runtime, frame, inst.arg);
-                } break;
+                runtime_push_new_table(runtime, frame, inst.arg);
+                break;
 
             case OP_SET_ITEM:
                 {
@@ -713,6 +768,10 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                     Yue_Value val = frame->stack[--frame->sp];
                     Yue_Value idx = frame->stack[--frame->sp];
                     Yue_Value obj = frame->stack[--frame->sp];
+                    if(obj.kind != YUE_VALUE_OBJ) {
+                        lexer_diagf(inst.loc, "Setting an item to a non-object value");
+                        return false;
+                    }
                     ASSERT(obj.kind == YUE_VALUE_OBJ);
                     switch(obj.objv->kind) {
                     case YUE_OBJECT_ARRAY:
@@ -857,18 +916,9 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                     }
                 } break;
 
-            case OP_ADD:
-            case OP_SUB:
-            case OP_MUL:
-            case OP_MOD:
-            case OP_EQ:
-            case OP_NE:
-            case OP_GT:
-            case OP_GE:
-            case OP_LT:
-            case OP_LE:
-            case OP_AND:
-            case OP_OR:
+            case OP_ADD: case OP_SUB: case OP_MUL: case OP_MOD:
+            case OP_EQ: case OP_NE: case OP_GT: case OP_GE:
+            case OP_LT: case OP_LE: case OP_AND: case OP_OR:
                 {
                     Yue_Value a = frame->stack[--frame->sp];
                     Yue_Value b = frame->stack[--frame->sp];

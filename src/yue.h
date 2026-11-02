@@ -1,6 +1,7 @@
 #ifndef YUE_H_
 #define YUE_H_
 
+#include <stdarg.h>
 #include <stdbool.h>
 
 #define YUE_VERSION_MAJOR    0
@@ -9,6 +10,15 @@
 
 typedef int Yue_Int;
 typedef float Yue_Flt;
+typedef enum {
+    YUE_OK = 0,
+    YUE_ERROR_WHATEVER,
+    YUE_ERROR_INVALID_ARGUMENT,
+
+    YUE_ERROR_KEY_NOT_FOUND,
+    YUE_ERROR_INVALID_INDEX,
+    YUE_ERROR_INVALID_KEY,
+} Yue_Result;
 
 typedef struct Yue_Context Yue_Context;
 typedef struct Yue_Object  Yue_Object;
@@ -33,7 +43,7 @@ typedef enum Yue_Object_Kind {
     YUE_OBJECT_NIL = 0, // This should never happened though
     YUE_OBJECT_STRING,
     YUE_OBJECT_ARRAY,
-    YUE_OBJECT_TABLE
+    YUE_OBJECT_TABLE,
 } Yue_Object_Kind;
 
 struct Yue_Value {
@@ -83,10 +93,10 @@ typedef struct Yue_Table {
 Yue_Context *yue_open(void);
 void         yue_close(Yue_Context *ctx);
 
-int yue_set_global_value(Yue_Context *ctx, const char *name, Yue_Value  value);
-int yue_get_global_value(Yue_Context *ctx, const char *name, Yue_Value *value);
+Yue_Result yue_set_global_value(Yue_Context *ctx, const char *name, Yue_Value  value);
+Yue_Result yue_get_global_value(Yue_Context *ctx, const char *name, Yue_Value *value);
 
-int yue_do_string(Yue_Context *ctx, const char *file, const char *source, size_t length);
+Yue_Result yue_do_string(Yue_Context *ctx, const char *file, const char *source, size_t length);
 
 bool yue_is_string(Yue_Value value);
 bool yue_is_array(Yue_Value value);
@@ -98,17 +108,24 @@ Yue_Value yue_new_table(Yue_Context *ctx);
 
 Yue_String *yue_to_string(Yue_Value value);
 Yue_Array  *yue_to_array(Yue_Value value);
+Yue_Table  *yue_to_table(Yue_Value value);
 
-void      yue_array_append(Yue_Array *array, Yue_Value item);
-Yue_Value yue_array_get   (Yue_Array *array, int index);
-void      yue_array_set   (Yue_Array *array, int index, Yue_Value value);
+void       yue_array_append(Yue_Array *array, Yue_Value item);
+Yue_Value  yue_array_get   (Yue_Array *array, int index);
+Yue_Result yue_array_set   (Yue_Array *array, int index, Yue_Value value);
 
-Yue_Int   yue_table_geti_ex(Yue_Table *table, const char *key, Yue_Int key_length);
-Yue_Int   yue_table_geti   (Yue_Table *table, Yue_Value key); // get the index of a key within the table
-Yue_Value yue_table_get_key(Yue_Table *table, Yue_Int index);
-void      yue_table_set    (Yue_Table *table, Yue_Int index, Yue_Value value);
-Yue_Value yue_table_get    (Yue_Table *table, Yue_Int index);
-void      yue_table_setitem(Yue_Table *table, Yue_Value key, Yue_Value value);
-Yue_Value yue_table_getitem(Yue_Table *table, Yue_Value key);
+// TODO: currently our internals still use functions that used assertion.
+//       use version that doesn't use assertion so we can report error.
+Yue_Int    yue_table_geti      (Yue_Table *table, Yue_Value key); // used assertion
+Yue_Result yue_table_geti_v1   (Yue_Table *table, Yue_Int *out_index, Yue_Value key);
+Yue_Result yue_table_geti_v2   (Yue_Table *table, Yue_Int *out_index, const char *key, Yue_Int key_length);
+Yue_Value  yue_table_get       (Yue_Table *table, Yue_Int index); // used assertion
+Yue_Result yue_table_get_v1    (Yue_Table *table, Yue_Value *out_value, Yue_Int index);
+Yue_Value  yue_table_getitem   (Yue_Table *table, Yue_Value key);
+Yue_Result yue_table_getitem_v1(Yue_Table *table, Yue_Value *out_value, Yue_Value key);
+Yue_Result yue_table_set       (Yue_Table *table, Yue_Int index, Yue_Value value);
+Yue_Result yue_table_setitem   (Yue_Table *table, Yue_Value key, Yue_Value value);
+Yue_Value  yue_table_getkey    (Yue_Table *table, Yue_Int index);
+Yue_Result yue_table_getkey_v1 (Yue_Table *table, Yue_Value *out_key, Yue_Int index);
 
 #endif // YUE_H_
