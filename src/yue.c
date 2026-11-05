@@ -539,14 +539,14 @@ Yue_Object *runtime_newobject(Runtime *runtime, Yue_Object_Kind kind, size_t siz
     return obj;
 }
 
-Yue_Object *runtime_new_string(Runtime *runtime, const char *init_text)
+Yue_Object *runtime_new_string(Runtime *runtime, const char *init_text, Yue_Int init_text_len)
 {
     Yue_Object_String *obj = (Yue_Object_String*)runtime_newobject(runtime, YUE_OBJECT_STRING, sizeof(Yue_Object_String));
     obj->string.count    = 0;
     obj->string.capacity = 0;
     obj->string.items    = 0;
-    if(init_text) {
-        size_t count = cstrlen(init_text);
+    if(init_text && init_text_len > 0) {
+        size_t count = init_text_len;
         da_reserve(&obj->string, count + 1);
         bufcpy(obj->string.items, init_text, count);
         obj->string.items[count] = 0;
@@ -557,7 +557,7 @@ Yue_Object *runtime_new_string(Runtime *runtime, const char *init_text)
 
 Yue_Object *runtime_pushnewstring(Runtime *runtime, CallFrame *frame, const char *init_text)
 {
-    Yue_Object *obj = runtime_new_string(runtime, init_text);
+    Yue_Object *obj = runtime_new_string(runtime, init_text, cstrlen(init_text));
     frame->stack[frame->sp++] = ((Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj });
     return (Yue_Object*)obj;
 }
@@ -639,7 +639,7 @@ void runtime_setglobal(Runtime *runtime, const char *name, Yue_Value value)
         break;
     case YUE_ERROR_KEY_NOT_FOUND:
         {
-            Yue_Object *obj = runtime_new_string(runtime, name);
+            Yue_Object *obj = runtime_new_string(runtime, name, cstrlen(name));
             Yue_Table_Entry entry = {0};
             entry.key   = (Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj };
             entry.value = value;
@@ -903,6 +903,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                             Yue_Call_Info info = {0};
                             info.argv = new_args;
                             info.argc = new_argc;
+                            // TODO: pass the context into native function
                             if(new_func_v.cfn(NULL, &info) != YUE_OK) {
                                 fprintf(stderr, "\n\n");
                                 lexer_diagf(inst.loc, "Calling native function failure");
@@ -1937,11 +1938,16 @@ bool yue_is_table(Yue_Value value)
     return value.objv->kind == YUE_OBJECT_TABLE;
 }
 
-Yue_Value yue_new_string(Yue_Context *ctx, const char *init_text)
+Yue_Value yue_new_string_v1(Yue_Context *ctx, const char *init_text, Yue_Int init_text_len)
 {
-    Yue_Object *obj = runtime_new_string(&ctx->runtime, init_text);
+    Yue_Object *obj = runtime_new_string(&ctx->runtime, init_text, init_text_len);
     Yue_Value value = (Yue_Value){ .kind = YUE_VALUE_OBJ, .objv = (Yue_Object*)obj };
     return value;
+}
+
+Yue_Value yue_new_string(Yue_Context *ctx, const char *init_text)
+{
+    return yue_new_string_v1(ctx, init_text, cstrlen(init_text));
 }
 
 Yue_Value yue_new_array(Yue_Context *ctx)

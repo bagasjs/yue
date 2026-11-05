@@ -103,7 +103,8 @@ bool yue_is_string(Yue_Value value);
 bool yue_is_array(Yue_Value value);
 bool yue_is_table(Yue_Value value);
 
-Yue_Value yue_new_string(Yue_Context *ctx, const char *init_text);
+Yue_Value yue_new_string   (Yue_Context *ctx, const char *init_text);
+Yue_Value yue_new_string_v1(Yue_Context *ctx, const char *init_text, Yue_Int init_text_len);
 Yue_Value yue_new_array(Yue_Context *ctx);
 Yue_Value yue_new_table(Yue_Context *ctx);
 

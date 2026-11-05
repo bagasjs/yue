@@ -1,5 +1,5 @@
 CC := clang
-CFLAGS := -Wall -Wextra -pedantic -fsanitize=address -Wno-deprecated-declarations -Wno-unused-parameter
+CFLAGS := -Wall -Wextra -pedantic -g -fsanitize=address -Wno-deprecated-declarations -Wno-unused-parameter
 LFLAGS := 
 
 build/yue.exe: ./src/yue.c ./src/main.c ./src/lexer.c ./src/utils.c

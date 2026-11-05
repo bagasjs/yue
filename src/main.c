@@ -60,6 +60,24 @@ Yue_Result f_len(Yue_Context *ctx, Yue_Call_Info *info)
     return YUE_OK;
 }
 
+Yue_Result f_chr(Yue_Context *ctx, Yue_Call_Info *info)
+{
+    if(info->argc < 1) {
+        fprintf(stderr, "ch expect at least though only used 1 argument but found %d", info->argc);
+        return YUE_ERROR_INVALID_ARGUMENT;
+    }
+    Yue_Value val = info->argv[0];
+    if(val.kind != YUE_VALUE_INT) {
+        fprintf(stderr, "chr expect 3");
+        return YUE_ERROR_INVALID_ARGUMENT;
+    }
+
+    char text = val.intv;
+    info->retv = yue_new_string_v1(ctx, &text, 1);
+    info->retc = 1;
+    return YUE_OK;
+}
+
 Yue_Result f_putchar(Yue_Context *ctx, Yue_Call_Info *info)
 {
     ASSERT(info->argc == 1 && "putchar expect more than 1 arguments");
@@ -145,6 +163,7 @@ int main(int argc, char *argv[])
     yue_set_global_value(ctx, "append", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_append });
     yue_set_global_value(ctx, "putchar", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_putchar });
     yue_set_global_value(ctx, "len", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_len });
+    yue_set_global_value(ctx, "chr", (Yue_Value){ .kind = YUE_VALUE_CFN, .cfn = f_chr });
 
     yue_do_string(ctx, source_filepath, source.items, source.count);
 
