@@ -1,0 +1,6 @@
+var hello_world = "Hello, World"
+var i = 0;
+while(i < len(hello_world)) {
+    print(chr(hello_world[i]))
+    i = i + 1
+}
