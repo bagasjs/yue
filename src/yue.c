@@ -903,7 +903,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                             Yue_Call_Info info = {0};
                             info.argv = new_args;
                             info.argc = new_argc;
-                            if(!new_func_v.cfn(NULL, &info)) {
+                            if(new_func_v.cfn(NULL, &info) != YUE_OK) {
                                 fprintf(stderr, "\n\n");
                                 lexer_diagf(inst.loc, "Calling native function failure");
                                 return false;

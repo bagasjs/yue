@@ -18,6 +18,7 @@ typedef enum {
     YUE_ERROR_KEY_NOT_FOUND,
     YUE_ERROR_INVALID_INDEX,
     YUE_ERROR_INVALID_KEY,
+    YUE_ERROR_INVALID_TYPE,
 } Yue_Result;
 
 typedef struct Yue_Context Yue_Context;
@@ -28,7 +29,7 @@ typedef struct Yue_String  Yue_String;
 typedef struct Yue_Array   Yue_Array;
 typedef struct Yue_Call_Info Yue_Call_Info;
 
-typedef bool (*Yue_Cfn)(Yue_Context *ctx, Yue_Call_Info *info); // Native Function
+typedef Yue_Result (*Yue_Cfn)(Yue_Context *ctx, Yue_Call_Info *info); // Native Function
 
 typedef enum Yue_Value_Kind {
     YUE_VALUE_NIL = 0,

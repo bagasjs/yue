@@ -9,11 +9,11 @@ int rand_range(int min, int max) {
 }
 #endif
 
-bool f_rand_range(Yue_Context *ctx, Yue_Call_Info *info)
+Yue_Result f_rand_range(Yue_Context *ctx, Yue_Call_Info *info)
 {
     if(info->argc < 2) {
         fprintf(stderr, "rand_range expect more than 2 arguments");
-        return false;
+        return YUE_ERROR_INVALID_ARGUMENT;
     }
     Yue_Value minv = info->argv[0];
     Yue_Value maxv = info->argv[1];
@@ -21,28 +21,28 @@ bool f_rand_range(Yue_Context *ctx, Yue_Call_Info *info)
     ASSERT(maxv.kind == YUE_VALUE_INT);
     info->retv = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = rand_range(minv.intv, maxv.intv) };
     info->retc = 1;
-    return true;
+    return YUE_OK;
 }
 
-bool f_append(Yue_Context *ctx, Yue_Call_Info *info) 
+Yue_Result f_append(Yue_Context *ctx, Yue_Call_Info *info) 
 {
     if(info->argc < 2) {
         fprintf(stderr, "append expect more than 2 arguments");
-        return false;
+        return YUE_ERROR_INVALID_ARGUMENT;
     }
     Yue_Value arrv = info->argv[0];
     Yue_Value newv = info->argv[1];
     Yue_Array *arr = yue_to_array(arrv);
     yue_array_append(arr, newv);
     info->retc = 0;
-    return true;
+    return YUE_OK;
 }
 
-bool f_len(Yue_Context *ctx, Yue_Call_Info *info) 
+Yue_Result f_len(Yue_Context *ctx, Yue_Call_Info *info) 
 {
     if(info->argc < 1) {
         fprintf(stderr, "len expect more than 2 arguments");
-        return false;
+        return YUE_ERROR_INVALID_ARGUMENT;
     }
     Yue_Value val  = info->argv[0];
     if(yue_is_array(val)) {
@@ -55,17 +55,17 @@ bool f_len(Yue_Context *ctx, Yue_Call_Info *info)
         info->retc = 1;
     } else {
         fprintf(stderr, "len expecting either array or string\n");
-        return false;
+        return YUE_ERROR_INVALID_TYPE;
     }
-    return true;
+    return YUE_OK;
 }
 
-bool f_putchar(Yue_Context *ctx, Yue_Call_Info *info)
+Yue_Result f_putchar(Yue_Context *ctx, Yue_Call_Info *info)
 {
     ASSERT(info->argc == 1 && "putchar expect more than 1 arguments");
     ASSERT(info->argv[0].kind == YUE_VALUE_INT);
     putchar(info->argv[0].intv);
-    return true;
+    return YUE_OK;
 }
 
 int main(int argc, char *argv[]) 
