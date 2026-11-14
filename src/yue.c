@@ -248,7 +248,6 @@ typedef struct Runtime {
     } all;
     // TODO: We need to separate field all and globals_table are belong to 
     //       into a new struct named HeapContext. This manages all heap we used.
-
     struct {
         CallFrame *items;
         size_t count;
@@ -716,13 +715,20 @@ void print_value(Yue_Value *values, size_t count, const char *endline, int level
     if(endline) printf("%s", endline);
 }
 
-bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *args, size_t argc, Yue_Value *retval, Loc loc)
+// TODO: this is stupid
+static Runtime *get_runtime(Yue_Context *ctx);
+
+// static Yue_Result
+bool  // TODO: currently it's using bool I want it to use Yue_Result
+run_function(Yue_Context *ctx, Module *module, Function *func, Yue_Value *args, size_t argc, Yue_Value *retval, Loc loc)
 {
     size_t pc = 0;
     int print_iter = 0;
     const int  PRINT_CAP = 0;
     const bool SILENT_PRINT = false;
     const int  STACK_PRINT_LIMIT = 0;
+
+    Runtime *runtime = get_runtime(ctx);
 
     size_t frame_ptr = runtime->call_frames.count;
     sa_append(&runtime->call_frames, ((CallFrame){0}));
@@ -890,7 +896,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                             new_argc = new_func->params_count; // we only pass the neccessary
                             Yue_Value *new_args  = &frame->stack[frame->sp - new_argc];
                             Yue_Value retval = {0};
-                            if(!run_function(runtime, module, new_func, new_args, new_argc, &retval, inst.loc)) return false;
+                            if(!run_function(ctx, module, new_func, new_args, new_argc, &retval, inst.loc)) return false;
                             frame->sp -= new_argc + 1;
                             frame->stack[frame->sp++] = retval;
                         } break;
@@ -900,8 +906,7 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
                             Yue_Call_Info info = {0};
                             info.argv = new_args;
                             info.argc = new_argc;
-                            // TODO: pass the context into native function. This causes SEGFAULT
-                            if(new_func_v.cfn(NULL, &info) != YUE_OK) {
+                            if(new_func_v.cfn(ctx, &info) != YUE_OK) {
                                 fprintf(stderr, "\n\n");
                                 lexer_diagf(inst.loc, "Calling native function failure");
                                 return false;
@@ -1062,8 +1067,9 @@ bool run_function(Runtime *runtime, Module *module, Function *func, Yue_Value *a
     return true;
 }
 
-bool run_module(Runtime *runtime, Module *module)
+bool run_module(Yue_Context *ctx, Module *module)
 {
+    Runtime *runtime = get_runtime(ctx);
     CallFrame *frames = malloc(sizeof(*frames) * 1024);
     Yue_Value *stack_values = malloc(sizeof(*stack_values) * 1024);
     runtime->call_frames.items    = frames;
@@ -1071,7 +1077,7 @@ bool run_module(Runtime *runtime, Module *module)
     runtime->call_frames.count = 0;
     Function *mainfn = &module->functions.items[0];
     Yue_Value retval = {0};
-    bool result = run_function(runtime, module, mainfn, NULL, 0, &retval, HERE());
+    bool result = run_function(ctx, module, mainfn, NULL, 0, &retval, HERE());
     if(!result) {
         fprintf(stderr, "Stack trace:\n");
         for(int i = runtime->call_frames.count - 1; i >= 0; i--) {
@@ -1084,6 +1090,7 @@ bool run_module(Runtime *runtime, Module *module)
                     );
         }
     }
+    free(stack_values);
     free(frames);
     return result;
 }
@@ -1882,6 +1889,11 @@ void yue_close(Yue_Context *ctx)
     free(ctx);
 }
 
+static Runtime *get_runtime(Yue_Context *ctx)
+{
+    return &ctx->runtime;
+}
+
 int yue_set_global_value(Yue_Context *ctx, const char *name, Yue_Value value)
 {
     runtime_setglobal(&ctx->runtime, name, value);
@@ -1962,7 +1974,7 @@ int yue_do_string(Yue_Context *ctx, const char *file, const char *source, size_t
     ctx->lexer = lexer_new(file, source, source + length);
     if(!parse_program(&ctx->parser, &ctx->lexer, &module)) return -1;
     /*dump_module(&module);*/
-    if(!run_module(&ctx->runtime, &module)) return -2;
+    if(!run_module(ctx, &module)) return -2;
     arena_destroy(&module.arena);
     return 0;
 }
@@ -1973,3 +1985,4 @@ int yue_do_string(Yue_Context *ctx, const char *file, const char *source, size_t
 ///     a. How do I iterate table?
 /// 3. Currently string is kinda sucks, its count might include null term or might not include
 /// 4. More efficient runtime and smaller codebase
+/// 5. Remove all ASSERT in runtime execution.

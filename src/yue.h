@@ -19,6 +19,9 @@ typedef enum {
     YUE_ERROR_INVALID_INDEX,
     YUE_ERROR_INVALID_KEY,
     YUE_ERROR_INVALID_TYPE,
+
+    YUE_ERROR_STACK_UNDERFLOW,
+    YUE_ERROR_STACK_OVERFLOW,
 } Yue_Result;
 
 typedef struct Yue_Context Yue_Context;

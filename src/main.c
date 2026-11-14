@@ -51,7 +51,7 @@ Yue_Result f_len(Yue_Context *ctx, Yue_Call_Info *info)
         info->retc = 1;
     } else if (yue_is_string(val)) {
         Yue_String *str = yue_to_string(val);
-        info->retv = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = str->count - 1, };
+        info->retv = (Yue_Value){ .kind = YUE_VALUE_INT, .intv = str->count, };
         info->retc = 1;
     } else {
         fprintf(stderr, "len expecting either array or string\n");
